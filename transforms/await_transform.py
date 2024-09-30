@@ -57,7 +57,7 @@ class AwaitMover(ast.NodeTransformer):
             new_body.extend(awaits_to_insert)
             new_body.append(new_stmt)
 
-        # Append remaining awaits at the end
+        # append the remaining awaits to the end of the function
         for var, await_node in self.future_calls.items():
             if var not in self.used_variables:
                 new_body.append(ast.Expr(value=await_node))

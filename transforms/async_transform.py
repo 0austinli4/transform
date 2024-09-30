@@ -2,9 +2,22 @@ import ast
 import argparse
 import os
 
-class AsyncTransformer(ast.NodeTransformer):
+async_calls = []
+
+class FunctionCollector(ast.NodeVisitor):
     def __init__(self):
+        self.functions = set()
+    
+    def visit_FunctionDef(self, node):
+        self.functions.add(node.name)
+
+class AsyncTransformer(ast.NodeTransformer):
+    def __init__(self, async_calls):
         self.ensure_future_vars = []
+        self.async_calls = async_calls
+        self.transformed_functions = set()  # Add this line
+
+        print("ALL ASYNC CALLS", async_calls)
     
     def visit_Import(self, node):
         """
@@ -41,6 +54,8 @@ class AsyncTransformer(ast.NodeTransformer):
         """
         # Get all lines in the function
         new_body = [self.visit(stmt) for stmt in node.body]
+
+        self.transformed_functions.add(node.name)  # Add this line
         
         async_node = ast.AsyncFunctionDef(
             name=node.name,
@@ -63,7 +78,10 @@ class AsyncTransformer(ast.NodeTransformer):
         node = self.generic_visit(node)
 
         # Check if the expression is a function call (ast.Call)
-        if isinstance(node.func, ast.Attribute) and node.func.attr in ['get_name', 'make_post', 'set_profile_picture']:
+        if isinstance(node.func, ast.Attribute) and node.func.attr != "__init__" and node.func.attr in self.async_calls or \
+           (isinstance(node.func, ast.Name) and node.func.id in self.transformed_functions):
+        # ['get_name', 'make_post', 'set_profile_picture']:
+        # node.func.attr in self.async_calls:
             # Create the asyncio.ensure_future call
             ensure_future_call = ast.Call(
                 func=ast.Attribute(
@@ -74,6 +92,7 @@ class AsyncTransformer(ast.NodeTransformer):
                 args=[node],  # Pass the original function call as an argument
                 keywords=[]  # No keyword arguments
             )
+            
 
             return ensure_future_call
 
@@ -89,21 +108,23 @@ class AsyncTransformer(ast.NodeTransformer):
                 node.value.func.value.id == 'asyncio'):
                 
                 # Get the variable name being assigned to (left-hand side)
-                assigned_var = node.targets[0]
+                return_list = []
+                for assigned_var in node.targets:
+                # assigned_var = node.targets[0]
+                    if isinstance(assigned_var, ast.Name):
+                        self.ensure_future_vars.append(assigned_var.id)
 
-                if isinstance(assigned_var, ast.Name):
-                    self.ensure_future_vars.append(assigned_var.id)
+                        # Create the await object
+                        await_object = ast.Await(
+                            value=ast.Name(id=assigned_var.id, ctx=ast.Load())
+                        )
 
-                    # Create the await object
-                    await_object = ast.Await(
-                        value=ast.Name(id=assigned_var.id, ctx=ast.Load())
-                    )
+                        # Create a new line with the await expression
+                        await_stmt = ast.Expr(value=await_object)
 
-                    # Create a new line with the await expression
-                    await_stmt = ast.Expr(value=await_object)
-
-                    # Return a list of nodes: the original assignment and the new await statement
-                    return [node, await_stmt]
+                        # Return a list of nodes: the original assignment and the new await statement
+                        return_list += [node, await_stmt]
+                return return_list
 
         return node
 
@@ -119,6 +140,15 @@ class AsyncTransformer(ast.NodeTransformer):
                 return ast.Expr(value=ast.Await(value=node.value))
         return node
 
+def collect_top_level_functions(file_path):
+    with open(file_path, 'r') as f:
+        source_code = f.read()
+    
+    tree = ast.parse(source_code)
+    collector = FunctionCollector()
+    collector.visit(tree)
+    return list(collector.functions)
+
 def main():
     # Set up argparse to handle command line arguments for multiple input files
     parser = argparse.ArgumentParser(description="Transform 'get' and 'set' calls into async 'await' calls.")
@@ -130,12 +160,17 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     for input_file in args.input_files:
+        # Collect top-level functions
+        async_calls = collect_top_level_functions(input_file)
+        print(f"Collected top-level functions from {input_file}:")
+        print(", ".join(async_calls))
+
         with open(input_file, 'r') as f:
             source_code = f.read()
 
         tree = ast.parse(source_code)
 
-        transformer = AsyncTransformer()
+        transformer = AsyncTransformer(async_calls)
         transformed_tree = transformer.visit(tree)
 
         ast.fix_missing_locations(transformed_tree)
