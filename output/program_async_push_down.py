@@ -13,56 +13,72 @@ async def make_post(post: str):
     posts.append(post)
 
 async def set_profile_picture(self, picture):
+    name = get_name()
     time.sleep(2)
-    name = asyncio.ensure_future(get_name())
-    await name
+    
+    pass
     print('picture')
+    await name
 
 async def script_function():
+    name = get_name(42)
+    post_confirmation = make_post()
+    new_post = make_post()
     start_time = time.time()
-    name = asyncio.ensure_future(get_name(42))
+    
+    pass
     await name
     if name == 'john':
         print('name is john')
-    post_confirmation = asyncio.ensure_future(make_post())
-    await post_confirmation
+    
+    pass
     print(f'Get result: {name}')
+    await post_confirmation
     print(f'Set result: {post_confirmation}')
     print(post_confirmation)
     end_time = time.time()
     print('total time ', end_time - start_time)
-    new_post = asyncio.ensure_future(make_post())
+    
+    pass
     await new_post
     my_output = new_post + 'hello'
     print(my_output)
 
 async def script_function():
+    name = api.get_name(42)
+    post_confirmation = api.make_post()
+    new_post = api.make_post()
     start_time = time.time()
     api = ExampleAPI()
-    name = asyncio.ensure_future(api.get_name(42))
+    
+    pass
+    
+    pass
     await name
-    post_confirmation = asyncio.ensure_future(api.make_post())
-    await post_confirmation
     if name == 'john':
         print('name is john')
     print(f'Get result: {name}')
+    await post_confirmation
     print(f'Set result: {post_confirmation}')
     print(post_confirmation)
     end_time = time.time()
     print('total time ', end_time - start_time)
-    new_post = asyncio.ensure_future(api.make_post())
+    
+    pass
     await new_post
     my_output = new_post + 'hello'
     print(my_output)
 
 async def my_function():
-    asyncio.ensure_future(script_function())
+    name = api.get_name(42)
+    script_function()
     api = ExampleAPI()
-    name = asyncio.ensure_future(api.get_name(42))
+    
+    pass
+    print('Temporary print ')
+    print('Temporary print ')
+    print('Temporary print ')
     await name
-    print('Temporary print ')
-    print('Temporary print ')
-    print('Temporary print ')
     print('name is ', name)
 
 async def non_async():

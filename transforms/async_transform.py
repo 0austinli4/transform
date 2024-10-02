@@ -16,7 +16,6 @@ class AsyncTransformer(ast.NodeTransformer):
         self.ensure_future_vars = []
         self.async_calls = async_calls
         self.transformed_functions = set()  # Add this line
-
         print("ALL ASYNC CALLS", async_calls)
     
     def visit_Import(self, node):
@@ -80,9 +79,6 @@ class AsyncTransformer(ast.NodeTransformer):
         # Check if the expression is a function call (ast.Call)
         if isinstance(node.func, ast.Attribute) and node.func.attr != "__init__" and node.func.attr in self.async_calls or \
            (isinstance(node.func, ast.Name) and node.func.id in self.transformed_functions):
-        # ['get_name', 'make_post', 'set_profile_picture']:
-        # node.func.attr in self.async_calls:
-            # Create the asyncio.ensure_future call
             ensure_future_call = ast.Call(
                 func=ast.Attribute(
                     value=ast.Name(id='asyncio', ctx=ast.Load()),  # asyncio.ensure_future
@@ -93,7 +89,6 @@ class AsyncTransformer(ast.NodeTransformer):
                 keywords=[]  # No keyword arguments
             )
             
-
             return ensure_future_call
 
         return node
@@ -108,23 +103,20 @@ class AsyncTransformer(ast.NodeTransformer):
                 node.value.func.value.id == 'asyncio'):
                 
                 # Get the variable name being assigned to (left-hand side)
-                return_list = []
-                for assigned_var in node.targets:
-                # assigned_var = node.targets[0]
-                    if isinstance(assigned_var, ast.Name):
-                        self.ensure_future_vars.append(assigned_var.id)
+                assigned_var = node.targets[0]
+                if isinstance(assigned_var, ast.Name):
+                    self.ensure_future_vars.append(assigned_var.id)
 
-                        # Create the await object
-                        await_object = ast.Await(
-                            value=ast.Name(id=assigned_var.id, ctx=ast.Load())
-                        )
+                    # Create the await object
+                    await_object = ast.Await(
+                        value=ast.Name(id=assigned_var.id, ctx=ast.Load())
+                    )
 
-                        # Create a new line with the await expression
-                        await_stmt = ast.Expr(value=await_object)
+                    # Create a new line with the await expression
+                    await_stmt = ast.Expr(value=await_object)
 
-                        # Return a list of nodes: the original assignment and the new await statement
-                        return_list += [node, await_stmt]
-                return return_list
+                    # Return a list of nodes: the original assignment and the new await statement
+                    return [node, await_stmt]
 
         return node
 
@@ -154,6 +146,7 @@ def main():
     parser = argparse.ArgumentParser(description="Transform 'get' and 'set' calls into async 'await' calls.")
     parser.add_argument('input_files', nargs='+', help="The Python file(s) to transform")
     args = parser.parse_args()
+    async_calls = []
 
     # Ensure output directory exists
     output_dir = os.path.join('..', 'output')
@@ -161,7 +154,7 @@ def main():
 
     for input_file in args.input_files:
         # Collect top-level functions
-        async_calls = collect_top_level_functions(input_file)
+        async_calls += collect_top_level_functions(input_file)
         print(f"Collected top-level functions from {input_file}:")
         print(", ".join(async_calls))
 

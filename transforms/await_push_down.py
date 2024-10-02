@@ -92,7 +92,7 @@ def main():
         
         new_source_code = ast.unparse(transformed_tree)
 
-        output_file = input_file.replace('.py', '_push.py')
+        output_file = input_file.replace('.py', '_down.py')
         output_file_path = os.path.join(output_dir, os.path.basename(output_file))
         
         with open(output_file_path, 'w') as f:
