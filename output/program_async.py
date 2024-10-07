@@ -1,7 +1,7 @@
-import asyncio, asyncio
-import asyncio, time
+import asyncio
+import time
 from test_api.api import ExampleAPI
-import asyncio, sys
+import sys
 posts = []
 
 async def get_name():

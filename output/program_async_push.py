@@ -1,7 +1,7 @@
-import asyncio, asyncio
-import asyncio, time
+import asyncio
+import time
 from test_api.api import ExampleAPI
-import asyncio, sys
+import sys
 posts = []
 
 async def get_name():
@@ -64,8 +64,8 @@ async def script_function():
     print(my_output)
 
 async def my_function():
-    name = asyncio.ensure_future(api.get_name(42))
     asyncio.ensure_future(script_function())
+    name = asyncio.ensure_future(api.get_name(42))
     api = ExampleAPI()
     await name
     print('Temporary print ')

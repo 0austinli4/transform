@@ -153,17 +153,17 @@ class AsyncTransformer(ast.NodeTransformer):
 
         return node
 
-    def visit_Expr(self, node):
-        """
-        For any function calls that include get and set, make sure the functions they exist in 
-        change to async 
-        """
-        node = self.generic_visit(node)
-        if isinstance(node.value, ast.Call):
-            # If it's a call to an async function, make sure it's awaited
-            if isinstance(node.value.func, ast.Name) and node.value.func.id in ['run', 'my_function']:
-                return ast.Expr(value=ast.Await(value=node.value))
-        return node
+    # def visit_Expr(self, node):
+    #     """
+    #     For any function calls that include get and set, make sure the functions they exist in 
+    #     change to async 
+    #     """
+    #     node = self.generic_visit(node)
+    #     if isinstance(node.value, ast.Call):
+    #         # If it's a call to an async function, make sure it's awaited
+    #         if isinstance(node.value.func, ast.Name) and node.value.func.id in ['run', 'my_function']:
+    #             return ast.Expr(value=ast.Await(value=node.value))
+    #     return node
 
 def collect_top_level_functions(file_path):
     with open(file_path, 'r') as f:
@@ -188,8 +188,8 @@ def main():
     for input_file in args.input_files:
         # Collect top-level functions
         async_calls += collect_top_level_functions(input_file)
-        print(f"Collected top-level functions from {input_file}:")
-        print(", ".join(async_calls))
+        # print(f"Collected top-level functions from {input_file}:")
+        # print(", ".join(async_calls))
 
         with open(input_file, 'r') as f:
             source_code = f.read()
