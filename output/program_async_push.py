@@ -16,6 +16,14 @@ async def set_profile_picture(self, picture):
     name = asyncio.ensure_future(get_name())
     time.sleep(2)
     await name
+    if name == 'john':
+        print('random stuff')
+        post_confirmation = asyncio.ensure_future(make_post())
+        await post_confirmation
+    else:
+        print('random stuff')
+        old_post = asyncio.ensure_future(make_post())
+        await old_post
     print('picture')
 
 async def script_function():

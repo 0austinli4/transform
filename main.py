@@ -14,8 +14,9 @@ commands = []
 
 for file in input_files:
     commands.extend([
-        f"python3 async_transform.py {file}",
-        f"python3 await_transform.py {file.replace('.py', '_async.py')}"
+        f"python3 transforms/async_transform.py test_api/{file}",
+        f"python3 transforms/async_future_push_up.py output/{file.replace('.py', '_async.py')}",
+        f"python3 transforms/await_push_down.py output/{file.replace('.py', '_async_push.py')}"
     ])
 
 for command in commands:

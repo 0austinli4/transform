@@ -13,17 +13,29 @@ async def make_post(post: str):
     posts.append(post)
 
 async def set_profile_picture(self, picture):
-    name = get_name()
+    name = asyncio.ensure_future(get_name())
+    post_confirmation = asyncio.ensure_future(make_post())
+    old_post = asyncio.ensure_future(make_post())
     time.sleep(2)
     
     pass
-    print('picture')
     await name
+    await post_confirmation
+    await old_post
+    if name == 'john':
+        post_confirmation = asyncio.ensure_future(make_post())
+        
+        pass
+    else:
+        old_post = asyncio.ensure_future(make_post())
+        
+        pass
+    print('picture')
 
 async def script_function():
-    name = get_name(42)
-    post_confirmation = make_post()
-    new_post = make_post()
+    name = asyncio.ensure_future(get_name(42))
+    post_confirmation = asyncio.ensure_future(make_post())
+    new_post = asyncio.ensure_future(make_post())
     start_time = time.time()
     
     pass
@@ -45,9 +57,9 @@ async def script_function():
     print(my_output)
 
 async def script_function():
-    name = api.get_name(42)
-    post_confirmation = api.make_post()
-    new_post = api.make_post()
+    name = asyncio.ensure_future(api.get_name(42))
+    post_confirmation = asyncio.ensure_future(api.make_post())
+    new_post = asyncio.ensure_future(api.make_post())
     start_time = time.time()
     api = ExampleAPI()
     
@@ -70,8 +82,8 @@ async def script_function():
     print(my_output)
 
 async def my_function():
-    name = api.get_name(42)
-    script_function()
+    name = asyncio.ensure_future(api.get_name(42))
+    asyncio.ensure_future(script_function())
     api = ExampleAPI()
     
     pass

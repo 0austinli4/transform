@@ -17,6 +17,12 @@ def make_post(post: str):
 def set_profile_picture(self, picture):
     time.sleep(2)  # Simulates waiting for 5 seconds
     name = get_name()
+    if name == "john":
+        print("random stuff")
+        post_confirmation = make_post()    # Getting a value (wait 3 seconds)
+    else:
+        print("random stuff")
+        old_post = make_post()    # Getting a value (wait 3 seconds)
     print("picture")
 
 def script_function():

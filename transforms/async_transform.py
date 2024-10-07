@@ -16,19 +16,59 @@ class AsyncTransformer(ast.NodeTransformer):
         self.ensure_future_vars = []
         self.async_calls = async_calls
         self.transformed_functions = set()  # Add this line
+        self.parent_node = None
         print("ALL ASYNC CALLS", async_calls)
     
-    def visit_Import(self, node):
-        """
-        Change the import statement to use api_async (hardcoded)
-        """
-        new_names = [ast.alias(name='asyncio')]
-        for alias in node.names:
-            if alias.name == 'api':
-                new_names.append(ast.alias(name='api_async', asname=alias.asname))
-            else:
-                new_names.append(alias)
-        return ast.Import(names=new_names)
+    def visit(self, node):
+        old_parent = self.parent_node
+        self.parent_node = node
+        result = super().visit(node)
+        self.parent_node = old_parent
+        return result
+    
+    def visit_If(self, node):
+        if isinstance(node.test, ast.Call):
+            var_name = f"async_var_{len(self.ensure_future_vars)}"
+            
+            assign = self.copy_location(ast.Assign(
+                targets=[ast.Name(id=var_name, ctx=ast.Store())],
+                value=ast.Call(
+                    func=ast.Attribute(
+                        value=ast.Name(id='asyncio', ctx=ast.Load()),
+                        attr='ensure_future',
+                        ctx=ast.Load()
+                    ),
+                    args=[node.test],
+                    keywords=[]
+                )
+            ), node)
+            
+            await_stmt = self.copy_location(ast.Expr(
+                value=ast.Await(
+                    value=ast.Name(id=var_name, ctx=ast.Load())
+                )
+            ), node)
+            
+            node.test = ast.Name(id=var_name, ctx=ast.Load())
+            
+            node.body = [self.visit(stmt) for stmt in node.body]
+            node.orelse = [self.visit(stmt) for stmt in node.orelse]
+            
+            return [assign, await_stmt, node]
+        else:
+            return self.generic_visit(node)
+
+    # def visit_Import(self, node):
+    #     """
+    #     Change the import statement to use api_async (hardcoded)
+    #     """
+    #     new_names = [ast.alias(name='asyncio')]
+    #     for alias in node.names:
+    #         if alias.name == 'api':
+    #             new_names.append(ast.alias(name='api_async', asname=alias.asname))
+    #         else:
+    #             new_names.append(alias)
+    #     return ast.Import(names=new_names)
 
     def visit_ImportFrom(self, node):
         """
@@ -48,50 +88,43 @@ class AsyncTransformer(ast.NodeTransformer):
         return node
 
     def visit_FunctionDef(self, node):
-        """
-        Add "async" to any function definitions in the program
-        """
-        # Get all lines in the function
         new_body = [self.visit(stmt) for stmt in node.body]
-
-        self.transformed_functions.add(node.name)  # Add this line
+        self.transformed_functions.add(node.name)
         
-        async_node = ast.AsyncFunctionDef(
+        async_node = self.copy_location(ast.AsyncFunctionDef(
             name=node.name,
             args=node.args,
             body=new_body,
             decorator_list=node.decorator_list,
             returns=node.returns,
             type_comment=node.type_comment
-        )
+        ), node)
         
         return async_node
-    
+
+
     def visit_Call(self, node):
-        """
-        For any function calls like api.set(42), transform them into 
-        asyncio.ensure_future(api.set(42)) and add await to get the result 
-        on the next line.
-        """
-        # Visit child nodes (important for visiting nested expressions)
         node = self.generic_visit(node)
-
-        # Check if the expression is a function call (ast.Call)
         if isinstance(node.func, ast.Attribute) and node.func.attr != "__init__" and node.func.attr in self.async_calls or \
-           (isinstance(node.func, ast.Name) and node.func.id in self.transformed_functions):
-            ensure_future_call = ast.Call(
-                func=ast.Attribute(
-                    value=ast.Name(id='asyncio', ctx=ast.Load()),  # asyncio.ensure_future
-                    attr='ensure_future',
-                    ctx=ast.Load()
-                ),
-                args=[node],  # Pass the original function call as an argument
-                keywords=[]  # No keyword arguments
-            )
-            
-            return ensure_future_call
-
+        (isinstance(node.func, ast.Name) and node.func.id in self.transformed_functions):
+            if not isinstance(self.parent_node, ast.If):
+                    ensure_future_call = self.copy_location(ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Name(id='asyncio', ctx=ast.Load()),
+                            attr='ensure_future',
+                            ctx=ast.Load()
+                        ),
+                        args=[node],
+                        keywords=[]  
+                    ), node)
+                    return ensure_future_call
         return node
+
+    def copy_location(self, new_node, old_node):
+        ast.copy_location(new_node, old_node)
+        ast.fix_missing_locations(new_node)
+        return new_node
+
 
     def visit_Assign(self, node):
         node = self.generic_visit(node)
@@ -149,7 +182,7 @@ def main():
     async_calls = []
 
     # Ensure output directory exists
-    output_dir = os.path.join('..', 'output')
+    output_dir = os.path.join('output')
     os.makedirs(output_dir, exist_ok=True)
 
     for input_file in args.input_files:

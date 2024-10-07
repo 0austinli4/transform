@@ -105,8 +105,8 @@ async def post(user, name):
 @bottle.route('/signup')
 @bottle.route('/login')
 async def login():
-    bottle.TEMPLATES.clear()
     async_var_1 = asyncio.ensure_future(user_is_logged())
+    bottle.TEMPLATES.clear()
     await async_var_1
     if async_var_1:
         bottle.redirect('/home')
