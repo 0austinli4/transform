@@ -1,89 +1,83 @@
-# main.py
-import asyncio
-import time
-from test_api.api import ExampleAPI
-import sys
 
-posts = []
+class User:
+    def __init__(self, name):
+        self.name = name
+        self.posts = {}
 
-def get_name():
-    time.sleep(2)  # Simulates some data read for 3 seconds
-    return "bob"
+class Twitter:
+    def __init__(self):
+        self.users = {}
+    def add_user(user):
+        self.users[user.name] = user
 
-def make_post(post: str):
-    time.sleep(2)
-    posts.append(post)
+t = Twitter()
 
-def set_profile_picture(self, picture):
-    time.sleep(2)  # Simulates waiting for 5 seconds
-    name = get_name()
-    if name == "john":
-        print("random stuff")
-        post_confirmation = make_post()    # Getting a value (wait 3 seconds)
+def log_info():
+    logged = is_logged_in()
+    users = t.users
+    posts = get_post(users)
+    sorted_posts = sort_all_posts()
+    return_post(user)
+    print(posts)
+    print(logged)
+    authenticate(logged)
+    return 
+
+def basic_move():
+    print("a")
+    print("b")
+    print("c")
+    ok = authenticate(logged)
+
+def authenticate(logged):
+    if not logged:
+        print("Not logged in")
+    process_auth()
+
+def sort_all_posts():
+    all_posts = []
+    initial_posts = get_posts(user)
+    for user in t.users:
+        posts = get_post(user)
+        print(posts)
+        all_posts.append(posts)
+    
+    if len(all_posts) > 10:
+        return all_posts
     else:
-        print("random stuff")
-        old_post = make_post()    # Getting a value (wait 3 seconds)
-    print("picture")
+        u = addUser('temporary')
+        all_posts.append(get_post(u))
 
-def script_function():
-    start_time = time.time()  # Start the timer
-    # This function will be the entry point to call the ExampleAPI methods
+def addUser(name):
+    new_user = User(name)
+    t.add_user(new_user)
+    return new_user
+
+def get_post(user):
+    if user.name not in t:
+        return None
     
-    name = get_name(42)  # Setting a value (wait 5 seconds)
+    return user.posts
 
-    if name == "john":
-        print("name is john")
-    
-    post_confirmation = make_post()    # Getting a value (wait 3 seconds)
+@decorator
+def add_post(postId: str, postNum: int):
+    if not is_logged_in():
+        return False
 
-    print(f"Get result: {name}")
+    if postId in posts:
+        return False
+    posts[postId] = postNum
 
-    print(f"Set result: {post_confirmation}")
-    print(post_confirmation)
+    return True
 
-    end_time = time.time()  # Start the timer
-    print("total time ", end_time-start_time)
+def is_logged_in():
+    return True
 
-    new_post = make_post()    # Getting a value (wait 3 seconds)
-    my_output = new_post + "hello"
-    print(my_output)
+@decorator
+def process_auth():
+    time.sleep(2)
 
-def script_function():
-    start_time = time.time()  # Start the timer
-    # This function will be the entry point to call the ExampleAPI methods
-    api = ExampleAPI()
-        
-    name = api.get_name(42)  # Setting a value (wait 5 seconds)
-    
-    post_confirmation = api.make_post()    # Getting a value (wait 3 seconds)
-
-    if name == "john":
-        print("name is john")
-
-    print(f"Get result: {name}")
-
-    print(f"Set result: {post_confirmation}")
-    print(post_confirmation)
-
-    end_time = time.time()  
-    print("total time ", end_time-start_time)
-
-    new_post = api.make_post()    
-    my_output = new_post + "hello"
-    print(my_output)
-
-def my_function():
-    script_function()
-    
-    api = ExampleAPI()
-
-    name = api.get_name(42)  
-    
-    print("Temporary print ")
-    print("Temporary print ")
-    print("Temporary print ")
-
-    print("name is ", name)
-
-def non_async():
-    print("this functino is not async")
+@decorator
+def return_post(user):
+    print(user.posts)
+    return user.posts

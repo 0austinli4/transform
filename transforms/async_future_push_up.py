@@ -1,59 +1,147 @@
 import ast
 import argparse
 import os
+from .await_push_down import get_variables_used
+
+class AssignmentTargetCollector(ast.NodeVisitor):
+    def __init__(self):
+        self.targets = set()
+
+    def visit_Assign(self, node):
+        for target in node.targets:
+            self.visit(target)
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, ast.Store):
+            self.targets.add(node.id)
+
+    def visit_Attribute(self, node):
+        if isinstance(node.ctx, ast.Store):
+            if isinstance(node.value, ast.Name):
+                self.targets.add(f"{node.value.id}.{node.attr}")
+        self.visit(node.value)
+
+    def visit_Tuple(self, node):
+        for elt in node.elts:
+            self.visit(elt)
+
+    def visit_List(self, node):
+        for elt in node.elts:
+            self.visit(elt)
+
+def get_assignment_targets(stmt):
+    collector = AssignmentTargetCollector()
+    collector.visit(stmt)
+    return set(collector.targets)
 
 class AsyncFuturePushUp(ast.NodeTransformer):
-    def __init__(self, limit):
-        self.limit = limit
-        self.ensure_future_calls = []
-        self.variable_uses = {}
-    
-    def visit_AsyncFunctionDef(self, node):
-        # reset at the top of a function definition 
-        self.variable_uses = {}
+    def __init__(self, external_functions):
+        self.external_functions = external_functions
 
-        # First pass: collect top-level ensure_future calls
-        final_body = []
-        new_body = []
-        for stmt in node.body:
-            if (isinstance(stmt, ast.Assign) or isinstance(stmt, ast.Expr)) and (isinstance(stmt.value, ast.Call) and isinstance(stmt.value.func, ast.Attribute) and stmt.value.func.attr == 'ensure_future'):
-                final_body.append(stmt)
-            else:
-                new_body.append(self.visit(stmt))
-        # Second pass: reorder statements
-        final_body.extend(new_body)
-        node.body = final_body
+    def visit_AsyncFunctionDef(self, node):
+        node.body = self.process_body(node.body)
         return node
 
+    def process_body(self, body):
+        future_calls = []
+        temp_body = []
+        final_body = []
+        vars_produced = set()
 
-def main():
-    parser = argparse.ArgumentParser(description="Transform async code to move ensure_future calls to the top and insert awaits before variable uses.")
-    parser.add_argument('input_files', nargs='+', help="The Python file(s) to transform")
-    args = parser.parse_args()
+        for stmt in body:
+            if self.is_ensure_future_call(stmt):
+                variables_used = get_variables_used(stmt)
+                print("\n\nVARIABLES PRODUCED", vars_produced)
+                print("\n\nVARIABLES USED", variables_used)
 
-    output_dir = os.path.join('output')
-    os.makedirs(output_dir, exist_ok=True)
+                if variables_used.intersection(vars_produced):
+                    print("EXTENSIONS" , stmt)
+                    temp_body.extend(future_calls)
 
-    for input_file in args.input_files:
-        with open(input_file, 'r') as f:
-            source_code = f.read()
-
-        tree = ast.parse(source_code)
-
-        dont_touch_function_names ={"print"}
-        transformer = AsyncFuturePushUp(dont_touch_function_names)
-        transformed_tree = transformer.visit(tree)
-        ast.fix_missing_locations(transformed_tree)
+                    temp_body = self.process_deps(temp_body, stmt)
+                    final_body.extend(temp_body)
+                    temp_body = []
+                    vars_produced = set()
+                else:
+                    future_calls.append(stmt)
+            elif self.is_await_call(stmt):
+                future_calls.append(stmt)
+            elif self.is_external_function_call(stmt):
+                # If we hit an external function call, process collected calls
+                final_body.extend(future_calls)
+                final_body.extend(temp_body)
+                final_body.append(stmt)
+                future_calls = []
+                temp_body = []
+            else:
+                targets = get_assignment_targets(stmt)
+                vars_produced.update(targets)
+                temp_body.append(self.visit(stmt))
+            
+        # Combine the processed statements
+        # processed_body = ensure_future_calls + other_statements
+        final_body.extend(future_calls)
+        final_body.extend(temp_body)
+        # Add the return statement if it exists
+        # if return_stmt:
+        #     processed_body.append(return_stmt)
+        return final_body
+    
+    def process_deps(self, temp_body, stmt):
+        print("PROCESSING DEP", stmt)
+        targets = get_variables_used(stmt)
         
-        new_source_code = ast.unparse(transformed_tree)
-
-        output_file = input_file.replace('.py', '_push.py')
-        output_file_path = os.path.join(output_dir, os.path.basename(output_file))
+        for i, temp_stmt in enumerate(temp_body):
+            vars_produced = get_assignment_targets(temp_stmt)
+            if vars_produced.intersection(targets):
+                temp_body.insert(i+1, stmt)
+                return temp_body
         
-        with open(output_file_path, 'w') as f:
-            f.write(new_source_code)
+        # If no insertion point found, append the statement to the end
+        temp_body.append(stmt)
+        return temp_body
 
-        print(f"Transformed code has been written to {output_file_path}.")
+    def is_ensure_future_call(self, node):
+        return (isinstance(node, ast.Assign) and
+                isinstance(node.value, ast.Call) and
+                isinstance(node.value.func, ast.Attribute) and
+                node.value.func.attr == 'ensure_future')
 
-if __name__ == "__main__":
-    main()
+    def is_external_function_call(self, node):
+        return (isinstance(node, ast.Expr) and
+                isinstance(node.value, ast.Call) and
+                isinstance(node.value.func, ast.Name) and
+                node.value.func.id in self.external_functions)
+
+    def is_await_call(self, node):
+        return (isinstance(node, ast.Expr) and
+                isinstance(node.value, ast.Await))
+    
+    # def visit_If(self, node):
+    #     node.body = self.process_body(node.body)
+    #     if node.orelse:
+    #         if isinstance(node.orelse[0], ast.If):
+    #             node.orelse = [self.visit(node.orelse[0])]
+    #         else:
+    #             node.orelse = self.process_body(node.orelse)
+    #     # node.orelse = self.process_body(node.orelse)
+    #     return node
+
+    # def visit_For(self, node):
+    #     node.body = self.process_body(node.body)
+    #     node.orelse = self.process_body(node.orelse)
+    #     return node
+
+    # def visit_While(self, node):
+    #     node.body = self.process_body(node.body)
+    #     node.orelse = self.process_body(node.orelse)
+    #     return node
+
+def async_future(source_code, external_functions):
+    print("hello running")
+    tree = ast.parse(source_code)
+    transformer = AsyncFuturePushUp(external_functions)
+    transformed_tree = transformer.visit(tree)
+    ast.fix_missing_locations(transformed_tree)
+    new_source_code = ast.unparse(transformed_tree)
+    return new_source_code

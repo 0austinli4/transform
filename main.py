@@ -1,33 +1,39 @@
 import subprocess
 import sys
+import argparse
+import os
+from transforms.async_transform import async_form
+from transforms.async_future_push_up import async_future
+from transforms.await_push_down import await_push
 
-def run_command(command):
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-    output, error = process.communicate()
-    return output.decode('utf-8'), error.decode('utf-8')
-if len(sys.argv) < 2:
-    print("Usage: python script.py <file1> <file2> ...")
-    sys.exit(1)
 
-input_files = sys.argv[1:]
-commands = []
+def print_to_file(code, output_file):
+    # output_file_path = os.path.join(output_file, os.path.basename(output_file))
+    with open(output_file, 'w') as f:
+        f.write(code)
 
-for file in input_files:
-    commands.extend([
-        f"python3 transforms/async_transform.py test_api/{file}",
-        f"python3 transforms/async_future_push_up.py output/{file.replace('.py', '_async.py')}",
-        f"python3 transforms/await_push_down.py output/{file.replace('.py', '_async_push.py')}"
-    ])
 
-for command in commands:
-    print(f"Running command: {command}")
-    output, error = run_command(command)
-    
-    if error:
-        print(f"Error: {error}")
-        sys.exit(1)
-    
-    print(f"Output:\n{output}")
-    print("-" * 50)
+input_file = None
+
+parser = argparse.ArgumentParser(description="Transform 'get' and 'set' calls into async 'await' calls.")
+parser.add_argument('input_file', help="The Python file to transform")
+parser.add_argument('methods', help="Comma-separated list of methods to transform")
+args = parser.parse_args()
+async_calls = [method.strip() for method in args.methods.split(',')]
+
+with open(args.input_file, 'r') as f:
+    source_code = f.read()
+
+# async transform
+async_code, external_functions = async_form(source_code, async_calls)
+print_to_file(async_code, "async_code.py")
+
+# async future push up
+async_push_up_code = async_future(async_code, external_functions)
+print_to_file(async_push_up_code, "push_up.py")
+
+# # await push down code
+await_push_down_code = await_push(async_push_up_code, external_functions)
+print_to_file(await_push_down_code, "final_code.py")
 
 print("All commands executed successfully.")
