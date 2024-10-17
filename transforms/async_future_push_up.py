@@ -51,32 +51,38 @@ class AsyncFuturePushUp(ast.NodeTransformer):
         for stmt in body:
             if self.is_ensure_future_call(stmt):
                 variables_used = get_variables_used(stmt)
-                print("\n\nVARIABLES PRODUCED", vars_produced)
-                print("\n\nVARIABLES USED", variables_used)
+
+                print("\n\n VARIABLES USED", variables_used)
+                print("VARIABLES PRODUCED", vars_produced)
 
                 if variables_used.intersection(vars_produced):
-                    print("EXTENSIONS" , stmt)
-                    temp_body.extend(future_calls)
-
+                    temp_body = future_calls + temp_body
                     temp_body = self.process_deps(temp_body, stmt)
                     final_body.extend(temp_body)
                     temp_body = []
                     vars_produced = set()
+                    future_calls = []
                 else:
                     future_calls.append(stmt)
             elif self.is_await_call(stmt):
+                targets = get_assignment_targets(stmt)
+                print("AWAIT PRODUCED", targets)
+                vars_produced.update(targets)
                 future_calls.append(stmt)
             elif self.is_external_function_call(stmt):
+                print("HIT EXTERNAL CALL")
                 # If we hit an external function call, process collected calls
                 final_body.extend(future_calls)
                 final_body.extend(temp_body)
                 final_body.append(stmt)
                 future_calls = []
                 temp_body = []
+                vars_produced = set()
             else:
+                print("PLACEHOLDER CODE")
                 targets = get_assignment_targets(stmt)
                 vars_produced.update(targets)
-                temp_body.append(self.visit(stmt))
+                temp_body.append(stmt)
             
         # Combine the processed statements
         # processed_body = ensure_future_calls + other_statements
@@ -88,12 +94,13 @@ class AsyncFuturePushUp(ast.NodeTransformer):
         return final_body
     
     def process_deps(self, temp_body, stmt):
-        print("PROCESSING DEP", stmt)
         targets = get_variables_used(stmt)
+        print("TARGETS PROCESS DEPS", targets)
         
         for i, temp_stmt in enumerate(temp_body):
             vars_produced = get_assignment_targets(temp_stmt)
             if vars_produced.intersection(targets):
+                print("INTERSECTION")
                 temp_body.insert(i+1, stmt)
                 return temp_body
         
@@ -114,9 +121,9 @@ class AsyncFuturePushUp(ast.NodeTransformer):
                 node.value.func.id in self.external_functions)
 
     def is_await_call(self, node):
-        return (isinstance(node, ast.Expr) and
-                isinstance(node.value, ast.Await))
-    
+        return (isinstance(node, (ast.Expr, ast.Assign)) and
+                isinstance(getattr(node, 'value', None), ast.Await))
+        
     # def visit_If(self, node):
     #     node.body = self.process_body(node.body)
     #     if node.orelse:

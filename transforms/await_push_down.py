@@ -125,8 +125,10 @@ class AwaitMover(ast.NodeTransformer):
 
 
     def is_await_call(self, node):
-        return (isinstance(node, ast.Expr) and
-                isinstance(node.value, ast.Await))
+        return (
+            (isinstance(node, ast.Expr) and isinstance(node.value, ast.Await)) or
+            (isinstance(node, ast.Assign) and isinstance(node.value, ast.Await))
+        )
 
     def is_external_function_call(self, node):
         return (isinstance(node, ast.Expr) and

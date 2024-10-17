@@ -52,7 +52,7 @@ def simple_dep_async_async():
 
 def externalizing_order():
     '''
-    Test that async invocation only get pushed up until production of dependent variable
+    Test ordering with external functions
     '''
     y = get('key')
     placeholder_code()
@@ -111,11 +111,22 @@ def control_flows_dep():
     for element in z:
         placeholder_code()
     return True
+
+def control_flows_dep_inside():
+    placeholder_code()
+    x = get('key')
+    while True:
+        placeholder_code(x)
+    z = get('key')
+    for element in list:
+        placeholder_code(z)
+    return True
     
 def invocation_order_with_deps():
     '''
     Check that when two operations are awaited and second is used as dependency, 
-    first one is awaited first
+    we pop out only the dependency and push the response (does not have to be
+    in order)
     '''
     y = get('key')
     x = get('key')
@@ -124,6 +135,34 @@ def invocation_order_with_deps():
     
     return True
 
+def function_def_without_result():
+    get('key')    
+    placeholder_code()
+    placeholder_code()
+    placeholder_code()
+    
+    return True
+
+def function_as_if():
+    if get('key'):
+        placeholder_code()
+    return True
+
+
+def function_for():
+    for element in get('key'):
+        placeholder_code()
+    return True
+
+def function_as_if():
+    '''
+    Check that when two operations are awaited and second is used as dependency, 
+    we pop out only the dependency and push the response (does not have to be
+    in order)
+    '''
+    while get('key'):
+        placeholder_code()
+    return True
 
 @decorator
 def send_user_message(message):

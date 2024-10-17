@@ -17,8 +17,11 @@ class AsyncTransformer(ast.NodeTransformer):
         self.async_calls = set(async_calls)
         self.transformed_functions = set()
         self.temp_var_counter = 0
+        self.future_counter = 0
 
     def visit_FunctionDef(self, node):
+        self.temp_var_counter = 0
+        self.future_counter = 0
         if node.name in self.async_calls:
             self.transformed_functions.add(node.name)
             new_body = []
@@ -48,29 +51,41 @@ class AsyncTransformer(ast.NodeTransformer):
         if isinstance(node.value, ast.Call):
             func_name = self.get_func_name(node.value)
             if func_name in self.async_calls:
+                future_var = f"future_{self.future_counter}"
+                self.future_counter += 1
+                
                 ensure_future_call = self.transform_async_call(node.value)
-                assign = self.copy_location(ast.Assign(targets=node.targets, value=ensure_future_call), node)
-                await_expr = self.copy_location(ast.Expr(
-                    value=ast.Await(value=ast.Name(id=node.targets[0].id, ctx=ast.Load()))
+                future_assign = self.copy_location(ast.Assign(
+                    targets=[ast.Name(id=future_var, ctx=ast.Store())],
+                    value=ensure_future_call
                 ), node)
-                return [assign, await_expr]
+                
+                await_assign = self.copy_location(ast.Assign(
+                    targets=node.targets,
+                    value=ast.Await(value=ast.Name(id=future_var, ctx=ast.Load()))
+                ), node)
+                
+                return [future_assign, await_assign]
         return node
 
     def visit_Expr(self, node):
         if isinstance(node.value, ast.Call):
             func_name = self.get_func_name(node.value)
             if func_name in self.async_calls:
-                var_name = f"async_{func_name}_{self.temp_var_counter}"
-                self.temp_var_counter += 1
+                future_var = f"future_{self.future_counter}"
+                self.future_counter += 1
+                
                 ensure_future_call = self.transform_async_call(node.value)
-                assign = self.copy_location(ast.Assign(
-                    targets=[ast.Name(id=var_name, ctx=ast.Store())],
+                future_assign = self.copy_location(ast.Assign(
+                    targets=[ast.Name(id=future_var, ctx=ast.Store())],
                     value=ensure_future_call
                 ), node)
+                
                 await_expr = self.copy_location(ast.Expr(
-                    value=ast.Await(value=ast.Name(id=var_name, ctx=ast.Load()))
+                    value=ast.Await(value=ast.Name(id=future_var, ctx=ast.Load()))
                 ), node)
-                return [assign, await_expr]
+                
+                return [future_assign, await_expr]
         return node
 
     def visit_If(self, node):
@@ -93,7 +108,7 @@ class AsyncTransformer(ast.NodeTransformer):
         if assignments:
             new_while = self.copy_location(ast.While(
                 test=transformed_test,
-                body=[self.visit(stmt) for stmt in node.body] + assignments,
+                body=[self.visit(stmt) for stmt in node.body],
                 orelse=[self.visit(stmt) for stmt in node.orelse]
             ), node)
             return assignments + [new_while]
@@ -105,43 +120,72 @@ class AsyncTransformer(ast.NodeTransformer):
 
     def visit_For(self, node):
         if isinstance(node.iter, ast.Call) and self.is_async_call(node.iter):
-            var_name = f"async_iter_{self.temp_var_counter}"
+            future_var = f"future_{self.future_counter}"
+            iter_var = f"async_iter_{self.temp_var_counter}"
+            self.future_counter += 1
             self.temp_var_counter += 1
-            assign = self.copy_location(ast.Assign(
-                targets=[ast.Name(id=var_name, ctx=ast.Store())],
+            
+            future_assign = self.copy_location(ast.Assign(
+                targets=[ast.Name(id=future_var, ctx=ast.Store())],
                 value=self.transform_async_call(node.iter)
             ), node)
-            await_expr = self.copy_location(ast.Expr(
-                value=ast.Await(value=ast.Name(id=var_name, ctx=ast.Load()))
+            
+            await_assign = self.copy_location(ast.Assign(
+                targets=[ast.Name(id=iter_var, ctx=ast.Store())],
+                value=ast.Await(value=ast.Name(id=future_var, ctx=ast.Load()))
             ), node)
+            
             new_for = self.copy_location(ast.For(
                 target=node.target,
-                iter=ast.Name(id=var_name, ctx=ast.Load()),
+                iter=ast.Name(id=iter_var, ctx=ast.Load()),
                 body=[self.visit(stmt) for stmt in node.body],
                 orelse=[self.visit(stmt) for stmt in node.orelse]
             ), node)
-            return [assign, await_expr, new_for]
+            
+            return [future_assign, await_assign, new_for]
         else:
             node.iter = self.visit(node.iter)
             node.body = [self.visit(stmt) for stmt in node.body]
             node.orelse = [self.visit(stmt) for stmt in node.orelse]
             return node
 
+    def transform_iterable(self, node):
+        if isinstance(node, ast.Call) and self.is_async_call(node):
+            iter_var = f"async_iter_{self.temp_var_counter}"
+            self.temp_var_counter += 1
+            
+            iter_assign = self.copy_location(ast.Assign(
+                targets=[ast.Name(id=iter_var, ctx=ast.Store())],
+                value=self.transform_async_call(node)
+            ), node)
+            
+            await_expr = self.copy_location(ast.Expr(
+                value=ast.Await(value=ast.Name(id=iter_var, ctx=ast.Load()))
+            ), node)
+            
+            return ast.Name(id=iter_var, ctx=ast.Load()), [iter_assign, await_expr]
+        return node, []
     def transform_condition(self, node):
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
             transformed_operand, assignments = self.transform_condition(node.operand)
             return ast.UnaryOp(op=ast.Not(), operand=transformed_operand), assignments
         elif isinstance(node, ast.Call) and self.is_async_call(node):
-            var_name = f"async_cond_{self.temp_var_counter}"
+            future_var = f"future_{self.future_counter}"
+            cond_var = f"async_cond_{self.temp_var_counter}"
+            self.future_counter += 1
             self.temp_var_counter += 1
-            assign = self.copy_location(ast.Assign(
-                targets=[ast.Name(id=var_name, ctx=ast.Store())],
+            
+            future_assign = self.copy_location(ast.Assign(
+                targets=[ast.Name(id=future_var, ctx=ast.Store())],
                 value=self.transform_async_call(node)
             ), node)
-            await_expr = self.copy_location(ast.Expr(
-                value=ast.Await(value=ast.Name(id=var_name, ctx=ast.Load()))
+            
+            await_assign = self.copy_location(ast.Assign(
+                targets=[ast.Name(id=cond_var, ctx=ast.Store())],
+                value=ast.Await(value=ast.Name(id=future_var, ctx=ast.Load()))
             ), node)
-            return ast.Name(id=var_name, ctx=ast.Load()), [assign, await_expr]
+            
+            return ast.Name(id=cond_var, ctx=ast.Load()), [future_assign, await_assign]
         return node, []
 
     def is_async_call(self, node):
