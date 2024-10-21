@@ -1,16 +1,20 @@
 '''
-Test file for IOC ordering 
+Test file for program transformations
 
-Async operations: GET 
+Async operations: 
+    - GET 
 
-Sync operations: SYNC_OP
+Sync operations:
+    - SYNC_OP
+    - placeholder_code()
 
 placeholder_code() represents any sequence of code that is not involved in the transformation 
-i.e., not dependent, not sychronous or async calls. Invocations and responses can freely move
+i.e., not dependent code or an async calls. Invocations and responses can freely move
 between these portions of code
 
-send_user_message() represents an externalized function (with decoration). Invocations and
+send_user_message() represents an externalized function (defined via decoration). Invocations and
 responses should be restricted by the location of these statements. 
+
 '''
 
 def basic_test():
@@ -22,7 +26,8 @@ def basic_test():
     placeholder_code()
     return result
 
-def simple_dep_async_sync():
+### TESTS FOR DEPENDENCIES
+def basic_test_dep_await():
     '''
     Test that awaits only get pushed down until dependency
     '''
@@ -31,7 +36,7 @@ def simple_dep_async_sync():
     result = sync_op(x)
     return result
 
-def simple_dep_sync_async():
+def basic_test_dep_invoke():
     '''
     Test that async invocation only get pushed up until production of dependent variable
     '''
@@ -40,7 +45,7 @@ def simple_dep_sync_async():
     result = get(x)
     return result
 
-def simple_dep_async_async():
+def basic_test_dep_asyncs():
     '''
     Test that async invocation only get pushed up until 
     production of dependent variable with another async
@@ -50,7 +55,7 @@ def simple_dep_async_async():
     result = get(y)
     return result
 
-def externalizing_order():
+def basic_test_externalizing_order():
     '''
     Test ordering with external functions
     '''
@@ -62,43 +67,67 @@ def externalizing_order():
     placeholder_code()
     z = get(y)
 
-def control_flow_simple():
+### TEST FOR CONTROL FLOW / IF STATEMENTS
+def basic_test_control_flow():
     '''
-    Check that invocations produced inside a control flow are awaited inside the control flow
+    Check that awaits and invocations can move past control flow statements
     '''
-    temp = placeholder_code()
+    if placeholder_code():
+        placeholder_code()
+    
+    y = get('key')
 
-    if temp:
-        x = get('key')
-    else:
-        x = get('key_2')
-    return result
+    if res:
+        placeholder_code(y)
+    
+    return True
 
-def control_flow_dep_result():
+
+def control_flow_dep_comparator():
     '''
-    Check that dependent results produced inside a control flow are awaited
+    Check that dependent results used inside a comparison
     '''
     x = get('key')
 
+    if x:
+        placeholder_code()
+    else:
+        result = get('key_2')
+    return result
+
+def control_flow_dep_inside():
+    '''
+    Check that dependent results used inside a control flow are awaited
+    '''
+    x = get('key')
+    
+    # await should be outside of the if statements
     if temp:
         result = get(x)
     else:
         result = get('key_2')
     return result
 
-def control_flow_dep_simple():
+def control_flow_transform_inside():
     '''
-    Check that a response used inside a control flow is awaited outside of that contorl flow
+    Check that invocations produced inside a control flow are awaited inside the control flow
     '''
-    y = get('key')
-    res = placeholder_code()
-    
-    if res:
-        placeholder_code(y)
-    
-    return True
+    temp = placeholder_code()
+
+    if temp:
+        placeholder_code()
+        x = get('key')
+        placeholder_code()
+    else:
+        placeholder_code()
+        x = get('key')
+        placeholder_code()
+    return result
 
 def control_flows_dep():
+    '''
+    Check control flow dependency with for, while, if statements
+    '''
     y = get('key')
     if y:
         placeholder_code()
@@ -112,7 +141,10 @@ def control_flows_dep():
         placeholder_code()
     return True
 
-def control_flows_dep_inside():
+def control_flows_dep_in_control():
+    '''
+    Check control flow dependency with dependency inside the control statement
+    '''
     placeholder_code()
     x = get('key')
     while True:
@@ -121,7 +153,40 @@ def control_flows_dep_inside():
     for element in list:
         placeholder_code(z)
     return True
-    
+
+def control_flows_invocation():
+    '''
+    Check control flow dependency with dependency inside the control statement
+    '''
+    placeholder_code()
+    x = placeholder_code()
+    if placeholder_code():
+        x = new_code()
+    result = get(x)
+    return result
+
+
+def control_flow_externalizing_order():
+    '''
+    Check that invocations produced inside a control flow are awaited inside the control flow
+    '''
+    temp = placeholder_code()
+
+    if temp:
+        placeholder_code()
+        x = get('key')
+        send_user_message()
+        z = get('key')
+        placeholder_code()
+    else:
+        placeholder_code()
+        x = get('key')
+        placeholder_code()
+    return result
+
+
+### INVOCATION ORDER TESTS
+        
 def invocation_order_with_deps():
     '''
     Check that when two operations are awaited and second is used as dependency, 
@@ -135,6 +200,8 @@ def invocation_order_with_deps():
     
     return True
 
+### Function definitions that transformation must add assignments for
+        
 def function_def_without_result():
     get('key')    
     placeholder_code()
@@ -154,12 +221,7 @@ def function_for():
         placeholder_code()
     return True
 
-def function_as_if():
-    '''
-    Check that when two operations are awaited and second is used as dependency, 
-    we pop out only the dependency and push the response (does not have to be
-    in order)
-    '''
+def function_as_while():
     while get('key'):
         placeholder_code()
     return True

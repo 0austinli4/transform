@@ -1,16 +1,13 @@
 
-def externalizing_order():
-    '''
-    Test ordering with external functions
-    '''
-    y = get('key')
-    placeholder_code()
-    ### externalizing function should create barrier between any await / async invocations
-    send_user_message()
-    placeholder_code()
-    placeholder_code()
-    z = get(y)
+def control_flow_dep_result():
+    x = get('key')
 
-@decorator
-def send_user_message():
-    print("User message")
+    if y:
+        placeholder_code()
+        placeholder_code()
+
+    placeholder_code()
+    placeholder_code()
+    return result
+
+    

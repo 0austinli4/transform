@@ -36,24 +36,37 @@ def get_assignment_targets(stmt):
 
 class AsyncFuturePushUp(ast.NodeTransformer):
     def __init__(self, external_functions):
+        print("\n\nStart of push up class")
         self.external_functions = external_functions
 
     def visit_AsyncFunctionDef(self, node):
         node.body = self.process_body(node.body)
         return node
+    
+    def visit_If(self, node):
+        print("Calling if inside body")
+        node.body = self.process_body(node.body)
+        if node.orelse:
+            if isinstance(node.orelse[0], ast.If):
+                node.orelse = [self.visit(node.orelse[0])]
+            else:
+                node.orelse = self.process_body(node.orelse)
+        return node
 
     def process_body(self, body):
+        print("PROCESS BODY")
         future_calls = []
         temp_body = []
         final_body = []
         vars_produced = set()
 
         for stmt in body:
+            stmt = self.visit(stmt)
             if self.is_ensure_future_call(stmt):
                 variables_used = get_variables_used(stmt)
 
-                print("\n\n VARIABLES USED", variables_used)
-                print("VARIABLES PRODUCED", vars_produced)
+                # print("\n\n VARIABLES USED", variables_used)
+                # print("VARIABLES PRODUCED", vars_produced)
 
                 if variables_used.intersection(vars_produced):
                     temp_body = future_calls + temp_body
@@ -66,11 +79,9 @@ class AsyncFuturePushUp(ast.NodeTransformer):
                     future_calls.append(stmt)
             elif self.is_await_call(stmt):
                 targets = get_assignment_targets(stmt)
-                print("AWAIT PRODUCED", targets)
                 vars_produced.update(targets)
                 future_calls.append(stmt)
             elif self.is_external_function_call(stmt):
-                print("HIT EXTERNAL CALL")
                 # If we hit an external function call, process collected calls
                 final_body.extend(future_calls)
                 final_body.extend(temp_body)
@@ -79,7 +90,6 @@ class AsyncFuturePushUp(ast.NodeTransformer):
                 temp_body = []
                 vars_produced = set()
             else:
-                print("PLACEHOLDER CODE")
                 targets = get_assignment_targets(stmt)
                 vars_produced.update(targets)
                 temp_body.append(stmt)
@@ -124,16 +134,7 @@ class AsyncFuturePushUp(ast.NodeTransformer):
         return (isinstance(node, (ast.Expr, ast.Assign)) and
                 isinstance(getattr(node, 'value', None), ast.Await))
         
-    # def visit_If(self, node):
-    #     node.body = self.process_body(node.body)
-    #     if node.orelse:
-    #         if isinstance(node.orelse[0], ast.If):
-    #             node.orelse = [self.visit(node.orelse[0])]
-    #         else:
-    #             node.orelse = self.process_body(node.orelse)
-    #     # node.orelse = self.process_body(node.orelse)
-    #     return node
-
+    
     # def visit_For(self, node):
     #     node.body = self.process_body(node.body)
     #     node.orelse = self.process_body(node.orelse)
@@ -145,7 +146,6 @@ class AsyncFuturePushUp(ast.NodeTransformer):
     #     return node
 
 def async_future(source_code, external_functions):
-    print("hello running")
     tree = ast.parse(source_code)
     transformer = AsyncFuturePushUp(external_functions)
     transformed_tree = transformer.visit(tree)

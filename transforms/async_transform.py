@@ -218,7 +218,6 @@ def collect_top_level_functions(source_code):
     tree = ast.parse(source_code)
     collector = FunctionCollector()
     collector.visit(tree)
-    # print("List of decorated functions", list(collector.decorated_functions))
     return list(collector.decorated_functions)
 
 
@@ -247,7 +246,6 @@ def main():
 
     args = parser.parse_args()
     async_calls = [method.strip() for method in args.methods.split(',')]
-    print("ALL ASYNC CALLS INPUT", async_calls)
     # Ensure output directory exists
     output_dir = os.path.join('output')
     os.makedirs(output_dir, exist_ok=True)
