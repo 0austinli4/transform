@@ -78,7 +78,7 @@ def basic_test_control_flow():
     y = get('key')
 
     if res:
-        placeholder_code(y)
+        placeholder_code()
     
     return True
 
@@ -183,6 +183,27 @@ def control_flow_externalizing_order():
         x = get('key')
         placeholder_code()
     return result
+
+### EXTERNAL MESSAGES
+def multiple_externalizing_order():
+    '''
+    Check that invocations between externalizing messages maintain relative ordering
+    '''
+    temp = placeholder_code()
+
+    x = get('key')
+    placeholder_code()
+    placeholder_code()
+    y = get('key')
+    
+    send_user_message()
+    
+    z = get('key')
+    placeholder_code()
+    send_user_message()
+
+    return result
+
 
 
 ### INVOCATION ORDER TESTS

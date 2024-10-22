@@ -47,24 +47,24 @@ class AwaitMover(ast.NodeTransformer):
         print("\n\nStart of push down class")
         self.external_functions = set(external_functions)
         self.var_dependencies = {}
-        self.awaits = {}
         self.awaits_stack = [{}]  # Stack of await dictionaries
     
     def visit_AsyncFunctionDef(self, node):
         print(f"Visiting AsyncFunctionDef: {node.name}")
         self.var_dependencies.clear()
-        self.awaits.clear()
+        # self.awaits.clear()
         self.awaits_stack = [{}]
         node.body = self.process_body(node.body)
         return node
     
     def process_body(self, body):
-        print("PROCESSING BODY")
+        # print("PROCESSING BODY")
         temp_body = []
         final_body = []
         
         for stmt in body:
             print(f"Processing statement: {ast.dump(stmt)[:50]}...")
+            print("CURRENT AWAIT STACK", self.awaits_stack)
             self.awaits_stack.append({})
             stmt = self.visit(stmt)
             current_awaits = self.awaits_stack.pop()
@@ -78,20 +78,18 @@ class AwaitMover(ast.NodeTransformer):
                 print(f"Added await: {await_variable_name}")
                 self.awaits_stack[-1][await_variable_name] = stmt
             elif isinstance(stmt, ast.If):
-                print("Encountered If statement in process_body")
-                # If we encounter an If statement, process everything collected so far
+                # Process if statement separately
+                processed_if = self.visit_If(stmt)
                 final_body.extend(temp_body)
-                final_body.append(stmt)
-                # final_body.extend(self.awaits.values())
-                # self.awaits.clear()
-                # Then add the If statement as is
+                final_body.extend(self.awaits_stack[-1].values())
+                self.awaits_stack[-1].clear()
+                final_body.append(processed_if)
                 temp_body = []
             elif variables_used.intersection(self.awaits_stack[-1].keys()):
                 print(f"Variables used: {variables_used}")
                 final_body.extend(temp_body)
                 variables_remove = variables_used.intersection(self.awaits_stack[-1].keys())
                 for variable_name in variables_remove:
-                    # print("POPPING OUT AWAIT STATEMENT ", variable_name)
                     final_body.append(self.awaits_stack[-1][variable_name])
                     del self.awaits_stack[-1][variable_name] 
                 final_body.append(stmt)
@@ -105,7 +103,6 @@ class AwaitMover(ast.NodeTransformer):
                 final_body.append(stmt)
                 temp_body = []
             elif self.is_return_statement(stmt):
-                print("At the last line")
                 final_body.extend(temp_body)
                 final_body.extend(self.awaits_stack[-1].values())
                 self.awaits_stack[-1].clear()
@@ -119,10 +116,7 @@ class AwaitMover(ast.NodeTransformer):
         final_body.extend(temp_body)
         final_body.extend(self.awaits_stack[-1].values())
         self.awaits_stack[-1].clear()
-        # final_body.extend(temp_body)
-        # final_body.extend(self.awaits.values())
-        # self.awaits = dict()
-
+        
         return final_body
 
     def get_await_variable_name(self, stmt):

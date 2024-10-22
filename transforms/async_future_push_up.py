@@ -54,7 +54,6 @@ class AsyncFuturePushUp(ast.NodeTransformer):
         return node
 
     def process_body(self, body):
-        print("PROCESS BODY")
         future_calls = []
         temp_body = []
         final_body = []
