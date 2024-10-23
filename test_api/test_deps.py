@@ -160,6 +160,7 @@ def control_flows_invocation():
     '''
     Check control flow dependency with dependency inside the control statement
     '''
+
     placeholder_code()
     x = placeholder_code()
     if placeholder_code():
@@ -200,6 +201,37 @@ def invocation_order_with_deps():
     
     placeholder_code(x)
     
+    return True
+    
+def invocation_order_inside_tests():
+    '''
+    Check other types of tests(deps) when placing between external invocations
+    '''
+    send_user_message()
+    if placeholder_code():
+        placeholder_code()
+    
+    y = get('key')
+
+    if res:
+        placeholder_code()
+    
+    send_user_message()
+    
+    placeholder_code(x)
+    
+    send_user_message()
+
+    x = get('key')
+    result = None
+    if x:
+        placeholder_code()
+    else:
+        result = get('key_2')
+        return result
+    
+    send_user_message()
+
     return True
 
 ### Function definitions that transformation must add assignments for

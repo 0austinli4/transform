@@ -1,4 +1,5 @@
 import asyncio
+'\nTest file for program transformations\n\nAsync operations: \n    - GET \n\nSync operations:\n    - SYNC_OP\n    - placeholder_code()\n\nplaceholder_code() represents any sequence of code that is not involved in the transformation \ni.e., not dependent code or an async calls. Invocations and responses can freely move\nbetween these portions of code\n\nsend_user_message() represents an externalized function (defined via decoration). Invocations and\nresponses should be restricted by the location of these statements. \n\n'
 
 async def basic_test():
     """Test that awaits are pushed to bottom, and invocations are pushed to top"""
@@ -165,6 +166,31 @@ in order)"""
     x = await future_1
     placeholder_code(x)
     y = await future_0
+    return True
+
+async def invocation_order_inside_tests():
+    """Check other types of tests(deps) when placing between external invocations"""
+    send_user_message()
+    future_0 = asyncio.ensure_future(get('key'))
+    if placeholder_code():
+        placeholder_code()
+    if res:
+        placeholder_code()
+    y = await future_0
+    send_user_message()
+    placeholder_code(x)
+    send_user_message()
+    future_1 = asyncio.ensure_future(get('key'))
+    result = None
+    x = await future_1
+    if x:
+        placeholder_code()
+    else:
+        future_2 = asyncio.ensure_future(get('key_2'))
+        result = await future_2
+        return result
+    result = await future_2
+    send_user_message()
     return True
 
 async def function_def_without_result():

@@ -180,6 +180,31 @@ in order)"""
     placeholder_code(x)
     return True
 
+async def invocation_order_inside_tests():
+    """Check other types of tests(deps) when placing between external invocations"""
+    '\n    Check other types of tests(deps) when placing between external invocations\n    '
+    send_user_message()
+    future_0 = asyncio.ensure_future(get('key'))
+    y = await future_0
+    if placeholder_code():
+        placeholder_code()
+    if res:
+        placeholder_code()
+    send_user_message()
+    placeholder_code(x)
+    send_user_message()
+    future_1 = asyncio.ensure_future(get('key'))
+    x = await future_1
+    result = None
+    if x:
+        placeholder_code()
+    else:
+        future_2 = asyncio.ensure_future(get('key_2'))
+        result = await future_2
+        return result
+    send_user_message()
+    return True
+
 async def function_def_without_result():
     future_0 = asyncio.ensure_future(get('key'))
     await future_0
