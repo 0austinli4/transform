@@ -1,13 +1,9 @@
-
-def control_flow_dep_result():
-    x = get('key')
-
-    if y:
-        placeholder_code()
-        placeholder_code()
-
+def control_flows_invocation():
+    '''
+    Check control flow dependency with dependency inside the control statement
+    '''
     placeholder_code()
-    placeholder_code()
+    x = placeholder_code()
+    x = placeholder_code()
+    result = get(x)
     return result
-
-    

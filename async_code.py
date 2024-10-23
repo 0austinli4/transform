@@ -65,7 +65,7 @@ async def basic_test_control_flow():
     future_0 = asyncio.ensure_future(get('key'))
     y = await future_0
     if res:
-        placeholder_code(y)
+        placeholder_code()
     return True
 
 async def control_flow_dep_comparator():
@@ -74,6 +74,7 @@ async def control_flow_dep_comparator():
     """
     future_0 = asyncio.ensure_future(get('key'))
     x = await future_0
+    result = None
     if x:
         placeholder_code()
     else:
@@ -92,8 +93,10 @@ async def control_flow_dep_inside():
         result = await future_1
     else:
         future_2 = asyncio.ensure_future(get('key_2'))
-        result = await future_2
-    return result
+        await future_2
+    if result:
+        return result
+    return ' '
 
 async def control_flow_transform_inside():
     """
@@ -145,6 +148,18 @@ async def control_flows_dep_in_control():
     for element in list:
         placeholder_code(z)
     return True
+
+async def control_flows_invocation():
+    """
+    Check control flow dependency with dependency inside the control statement
+    """
+    placeholder_code()
+    x = placeholder_code()
+    if placeholder_code():
+        x = new_code()
+    future_0 = asyncio.ensure_future(get(x))
+    result = await future_0
+    return result
 
 async def control_flow_externalizing_order():
     """

@@ -40,11 +40,14 @@ class AsyncFuturePushUp(ast.NodeTransformer):
         self.external_functions = external_functions
 
     def visit_AsyncFunctionDef(self, node):
-        node.body = self.process_body(node.body)
+        docstring = ast.get_docstring(node)
+        if docstring:
+            node.body = [ast.Expr(ast.Str(s=docstring))] + self.process_body(node.body)
+        else:
+            node.body = self.process_body(node.body)
         return node
     
     def visit_If(self, node):
-        print("Calling if inside body")
         node.body = self.process_body(node.body)
         if node.orelse:
             if isinstance(node.orelse[0], ast.If):
@@ -54,7 +57,6 @@ class AsyncFuturePushUp(ast.NodeTransformer):
         return node
 
     def process_body(self, body):
-        print("PROCESS BODY")
         future_calls = []
         temp_body = []
         final_body = []
@@ -67,6 +69,8 @@ class AsyncFuturePushUp(ast.NodeTransformer):
 
                 # print("\n\n VARIABLES USED", variables_used)
                 # print("VARIABLES PRODUCED", vars_produced)
+
+                new_body = []
 
                 if variables_used.intersection(vars_produced):
                     temp_body = future_calls + temp_body
@@ -105,18 +109,21 @@ class AsyncFuturePushUp(ast.NodeTransformer):
     
     def process_deps(self, temp_body, stmt):
         targets = get_variables_used(stmt)
-        print("TARGETS PROCESS DEPS", targets)
+        latest_insertion_point = -1
         
         for i, temp_stmt in enumerate(temp_body):
             vars_produced = get_assignment_targets(temp_stmt)
             if vars_produced.intersection(targets):
-                print("INTERSECTION")
-                temp_body.insert(i+1, stmt)
-                return temp_body
-        
-        # If no insertion point found, append the statement to the end
-        temp_body.append(stmt)
-        return temp_body
+                latest_insertion_point = i+1
+    
+        if latest_insertion_point != -1:
+            temp_body.insert(latest_insertion_point, stmt)
+        else:
+            raise Exception('no insertion point found')
+        return temp_body  
+        # # If no insertion point found, append the statement to the end
+        # temp_body.append(stmt)
+        # return temp_body
 
     def is_ensure_future_call(self, node):
         return (isinstance(node, ast.Assign) and

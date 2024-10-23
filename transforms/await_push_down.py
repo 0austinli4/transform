@@ -15,7 +15,6 @@ class VariableCollector(ast.NodeVisitor):
             self.visit(keyword.value)
 
     def visit_Name(self, node):
-        # Only add names that are in a "load" context (i.e., being used, not assigned)
         if isinstance(node.ctx, ast.Load):
             self.variables.add(node.id)
     
@@ -23,8 +22,9 @@ class VariableCollector(ast.NodeVisitor):
         # Visit the test condition of the if statement
         self.visit(node.test)
         # Visit the body and orelse parts
-        for stmt in node.body + node.orelse:
-            self.visit(stmt)
+
+        # for stmt in node.body + node.orelse:
+        #     self.visit(stmt)
 
     def visit_Attribute(self, node):
         # For attributes, we're only interested in the base name
@@ -46,83 +46,108 @@ class AwaitMover(ast.NodeTransformer):
     def __init__(self, external_functions):
         print("\n\nStart of push down class")
         self.external_functions = set(external_functions)
+        self.nesting = 0
         self.var_dependencies = {}
-        self.awaits = {}
-        self.awaits_stack = [{}]  # Stack of await dictionaries
+        self.global_awaits = {}
     
     def visit_AsyncFunctionDef(self, node):
-        print(f"Visiting AsyncFunctionDef: {node.name}")
+        self.nesting = 0
         self.var_dependencies.clear()
-        self.awaits.clear()
-        self.awaits_stack = [{}]
+        self.global_awaits.clear()
+        
+        # get comments
+        docstring = ast.get_docstring(node)
+        if docstring:
+            node.body = [stmt for stmt in node.body if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Str))]
+            node.body.insert(0, ast.Expr(ast.Str(s=docstring)))
+        
         node.body = self.process_body(node.body)
         return node
     
     def process_body(self, body):
-        print("PROCESSING BODY")
+        print("\n\nAt the top of body, reset all")
+        self.nesting += 1
+        local_awaits = {}
         temp_body = []
         final_body = []
         
         for stmt in body:
-            print(f"Processing statement: {ast.dump(stmt)[:50]}...")
-            self.awaits_stack.append({})
             stmt = self.visit(stmt)
-            current_awaits = self.awaits_stack.pop()
-            self.awaits_stack[-1].update(current_awaits)
 
             variables_used = get_variables_used(stmt)
 
             if self.is_await_call(stmt):
-                print("Encountered await call")
                 await_variable_name = self.get_await_variable_name(stmt)
-                print(f"Added await: {await_variable_name}")
-                self.awaits_stack[-1][await_variable_name] = stmt
-            elif isinstance(stmt, ast.If):
-                print("Encountered If statement in process_body")
-                # If we encounter an If statement, process everything collected so far
+                print("Adding await call", await_variable_name)
+                self.global_awaits[await_variable_name] = stmt
+                local_awaits[await_variable_name] = stmt
+                print("Hit await first time ", await_variable_name)
+            elif variables_used.intersection(self.global_awaits.keys()):
                 final_body.extend(temp_body)
-                final_body.append(stmt)
-                # final_body.extend(self.awaits.values())
-                # self.awaits.clear()
-                # Then add the If statement as is
-                temp_body = []
-            elif variables_used.intersection(self.awaits_stack[-1].keys()):
-                print(f"Variables used: {variables_used}")
-                final_body.extend(temp_body)
-                variables_remove = variables_used.intersection(self.awaits_stack[-1].keys())
+                variables_remove = variables_used.intersection(self.global_awaits.keys())
+                print("Found dependency", variables_remove)
+                print("Current local await", local_awaits)
+
                 for variable_name in variables_remove:
-                    # print("POPPING OUT AWAIT STATEMENT ", variable_name)
-                    final_body.append(self.awaits_stack[-1][variable_name])
-                    del self.awaits_stack[-1][variable_name] 
-                final_body.append(stmt)
+                    final_body.append(self.global_awaits[variable_name])
+                    if self.nesting == 1:
+                        del self.global_awaits[variable_name]
+                        print("removing", self.global_awaits)
+                    if variable_name in local_awaits:
+                        del local_awaits[variable_name]
                 temp_body = []
+
+                # don't have anything after a return statements
+                if self.nesting == 1 and self.is_return_statement(stmt):
+                    print("last return statement")
+                    final_body.extend(self.global_awaits.values())
+                    self.global_awaits.clear()
+                    local_awaits = {}
+                final_body.append(stmt)
             elif self.is_external_function_call(stmt):
-                print("Encountered external function call or return statement")
                 # If we hit an external function call, process collected calls
                 final_body.extend(temp_body)
-                final_body.extend(self.awaits_stack[-1].values())
-                self.awaits_stack[-1].clear()
+                final_body.extend(self.global_awaits.values())
+                self.global_awaits.clear()
+                local_awaits = {}
                 final_body.append(stmt)
                 temp_body = []
             elif self.is_return_statement(stmt):
-                print("At the last line")
+                print("This is a return statement", self.nesting)
                 final_body.extend(temp_body)
-                final_body.extend(self.awaits_stack[-1].values())
-                self.awaits_stack[-1].clear()
+                final_body.extend(self.global_awaits.values())
                 final_body.append(stmt)
+                if self.nesting == 1:
+                    self.global_awaits.clear()
+                local_awaits = {}
                 temp_body = []
             else:
                 stmt = self.visit(stmt)
-                temp_body.append(self.visit(stmt))
-        # Combine the processed statements
-        print("Finalizing process_body")
-        final_body.extend(temp_body)
-        final_body.extend(self.awaits_stack[-1].values())
-        self.awaits_stack[-1].clear()
-        # final_body.extend(temp_body)
-        # final_body.extend(self.awaits.values())
-        # self.awaits = dict()
+                temp_body.append(stmt)
 
+        # Combine the processed statements
+        final_body.extend(temp_body)
+
+        print("Finished local, extending awaits", local_awaits.keys())
+        
+        final_body.extend(local_awaits.values())
+
+        common_keys = set(self.global_awaits.keys()).intersection(local_awaits.keys())
+
+        # Remove these keys from dict1
+        for key in common_keys:
+            del self.global_awaits[key]
+        
+        local_awaits = {}
+
+        # print("Current body nesting level", self.nesting, self.global_awaits)
+        if self.nesting == 1:
+            print('End of body, returning global', self.global_awaits.values())
+            final_body.extend(self.global_awaits.values())
+            self.global_awaits.clear()
+            
+        self.nesting -= 1 
+        print("Returning final body")
         return final_body
 
     def get_await_variable_name(self, stmt):
@@ -133,29 +158,6 @@ class AwaitMover(ast.NodeTransformer):
             if isinstance(stmt.value.value, ast.Name):
                 return stmt.value.value.id
         return None
-    # def visit_Call(self, node):
-    #     args = self.get_all_arguments(node)
-    #     for arg in args:
-    #         if isinstance(arg, ast.Name):
-    #             self.var_dependencies.setdefault(arg.id, set()).add(self.get_call_name(node))
-    #     return node
-
-    # def get_call_name(self, node):
-    #     if isinstance(node.func, ast.Name):
-    #         return node.func.id
-    #     elif isinstance(node.func, ast.Attribute):
-    #         return node.func.attr
-    #     return ''
-
-    # def get_all_arguments(self, node):
-    #     args = []
-    #     if isinstance(node, ast.Call):
-    #         args.extend(node.args)
-    #         args.extend([kw.value for kw in node.keywords])
-    #         if isinstance(node.func, ast.Attribute):
-    #             args.append(node.func.value)
-    #     return args
-
 
     def is_await_call(self, node):
         return (
@@ -171,16 +173,7 @@ class AwaitMover(ast.NodeTransformer):
 
     def is_return_statement(self, node):
         return isinstance(node, ast.Return)
-
-    # def visit_AsyncFunctionDef(self, node):
-    #     self.scopes.append({})
-    #     self.current_scope = self.scopes[-1]
-    #     self.generic_visit(node)
-    #     node.body = self.insert_awaits(node.body)
-    #     self.scopes.pop()
-    #     self.current_scope = self.scopes[-1]
-    #     return node
-
+    
     def visit_If(self, node):
         node.body = self.process_body(node.body)
         if node.orelse:
@@ -188,8 +181,17 @@ class AwaitMover(ast.NodeTransformer):
                 node.orelse = [self.visit(node.orelse[0])]
             else:
                 node.orelse = self.process_body(node.orelse)
-        # node.orelse = self.process_body(node.orelse)
         return node
+
+    # def visit_If(self, node):
+    #     node.body = self.process_body(node.body)
+    #     if node.orelse:
+    #         if isinstance(node.orelse[0], ast.If):
+    #             node.orelse = [self.visit(node.orelse[0])]
+    #         else:
+    #             node.orelse = self.process_body(node.orelse)
+    #     # node.orelse = self.process_body(node.orelse)
+    #     return node
 
 
     # def visit_Call(self, node):

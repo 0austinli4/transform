@@ -78,7 +78,7 @@ def basic_test_control_flow():
     y = get('key')
 
     if res:
-        placeholder_code(y)
+        placeholder_code()
     
     return True
 
@@ -88,7 +88,7 @@ def control_flow_dep_comparator():
     Check that dependent results used inside a comparison
     '''
     x = get('key')
-
+    result = None
     if x:
         placeholder_code()
     else:
@@ -101,12 +101,14 @@ def control_flow_dep_inside():
     '''
     x = get('key')
     
-    # await should be outside of the if statements
+    # await should be inside of the if statements
     if temp:
         result = get(x)
     else:
-        result = get('key_2')
-    return result
+        get('key_2')
+    if result:
+        return result
+    return ' '
 
 def control_flow_transform_inside():
     '''
