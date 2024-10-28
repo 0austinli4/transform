@@ -16,7 +16,7 @@ send_user_message() represents an externalized function (defined via decoration)
 responses should be restricted by the location of these statements. 
 
 '''
-
+### Basic tests
 def basic_test():
     '''
     Test that awaits are pushed to bottom, and invocations are pushed to top
@@ -78,7 +78,7 @@ def basic_test_control_flow():
     y = get('key')
 
     if res:
-        placeholder_code(y)
+        placeholder_code()
     
     return True
 
@@ -88,7 +88,7 @@ def control_flow_dep_comparator():
     Check that dependent results used inside a comparison
     '''
     x = get('key')
-
+    result = None
     if x:
         placeholder_code()
     else:
@@ -101,12 +101,14 @@ def control_flow_dep_inside():
     '''
     x = get('key')
     
-    # await should be outside of the if statements
+    # await should be inside of the if statements
     if temp:
         result = get(x)
     else:
-        result = get('key_2')
-    return result
+        get('key_2')
+    if result:
+        return result
+    return ' '
 
 def control_flow_transform_inside():
     '''
@@ -158,6 +160,7 @@ def control_flows_invocation():
     '''
     Check control flow dependency with dependency inside the control statement
     '''
+
     placeholder_code()
     x = placeholder_code()
     if placeholder_code():
@@ -199,6 +202,37 @@ def invocation_order_with_deps():
     placeholder_code(x)
     
     return True
+    
+def invocation_order_inside_tests():
+    '''
+    Check other types of tests(deps) when placing between external invocations
+    '''
+    send_user_message()
+    if placeholder_code():
+        placeholder_code()
+    
+    y = get('key')
+
+    if res:
+        placeholder_code()
+    
+    send_user_message()
+    
+    placeholder_code(x)
+    
+    send_user_message()
+
+    x = get('key')
+    result = None
+    if x:
+        placeholder_code()
+    else:
+        result = get('key_2')
+        return result
+    
+    send_user_message()
+
+    return True
 
 ### Function definitions that transformation must add assignments for
         
@@ -224,6 +258,27 @@ def function_for():
 def function_as_while():
     while get('key'):
         placeholder_code()
+    return True
+
+### Check that functions consistency is correct
+        
+def consistency_res():
+    '''
+    two results are named the same  - make sure both are awaited
+    '''
+    x = get('key')    
+    x = get('key')
+    
+    return True
+
+### Check multiple variables can be assigned as inputs and ouptuts to functions
+def consistency_res():
+    '''
+    two results are named the same  - make sure both are awaited
+    '''
+    x, y = get('key')   
+    placeholder_code(x)
+    
     return True
 
 @decorator
