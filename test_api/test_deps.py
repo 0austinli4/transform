@@ -93,6 +93,7 @@ def control_flow_dep_comparator():
         placeholder_code()
     else:
         result = get('key_2')
+        return result
     return result
 
 def control_flow_dep_inside():
