@@ -18,6 +18,8 @@ Call `python main.py [path_to_file] {'functions to make async'}`
 
 Example of the expected input/output or a use case:
 
+Command: `python main.py program.py 'basic_test, get'`
+
 Original program:
 ```
 def basic_test():
