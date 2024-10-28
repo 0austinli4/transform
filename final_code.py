@@ -188,8 +188,8 @@ async def invocation_order_inside_tests():
     else:
         future_2 = asyncio.ensure_future(get('key_2'))
         result = await future_2
+        x = await future_1
         return result
-    result = await future_2
     send_user_message()
     return True
 
@@ -220,6 +220,16 @@ async def function_as_while():
     async_cond_0 = await future_0
     while async_cond_0:
         placeholder_code()
+    return True
+
+def consistency_res():
+    """
+    two results are named the same  - make sure both are awaited
+    """
+    future_0 = asyncio.ensure_future(get('key'))
+    x = await future_0
+    future_1 = asyncio.ensure_future(get('key'))
+    x = await future_1
     return True
 
 @decorator

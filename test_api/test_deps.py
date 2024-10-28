@@ -16,7 +16,7 @@ send_user_message() represents an externalized function (defined via decoration)
 responses should be restricted by the location of these statements. 
 
 '''
-
+### Basic tests
 def basic_test():
     '''
     Test that awaits are pushed to bottom, and invocations are pushed to top
@@ -258,6 +258,17 @@ def function_for():
 def function_as_while():
     while get('key'):
         placeholder_code()
+    return True
+
+### Check that functions consistency is correct
+        
+def consistency_res():
+    '''
+    two results are named the same  - make sure both are awaited
+    '''
+    x = get('key')    
+    x = get('key')
+    
     return True
 
 @decorator

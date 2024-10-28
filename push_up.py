@@ -234,6 +234,16 @@ async def function_as_while():
         placeholder_code()
     return True
 
+def consistency_res():
+    """
+    two results are named the same  - make sure both are awaited
+    """
+    future_0 = asyncio.ensure_future(get('key'))
+    x = await future_0
+    future_1 = asyncio.ensure_future(get('key'))
+    x = await future_1
+    return True
+
 @decorator
 def send_user_message(message):
     print(f'User message: {message}')

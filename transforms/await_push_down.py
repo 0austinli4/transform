@@ -8,7 +8,6 @@ class VariableCollector(ast.NodeVisitor):
         self.variables = set()
 
     def visit_Call(self, node):
-        # Visit all arguments of the function call
         for arg in node.args:
             self.visit(arg)
         for keyword in node.keywords:
@@ -19,15 +18,9 @@ class VariableCollector(ast.NodeVisitor):
             self.variables.add(node.id)
     
     def visit_If(self, node):
-        # Visit the test condition of the if statement
         self.visit(node.test)
-        # Visit the body and orelse parts
-
-        # for stmt in node.body + node.orelse:
-        #     self.visit(stmt)
-
+    
     def visit_Attribute(self, node):
-        # For attributes, we're only interested in the base name
         if isinstance(node.value, ast.Name):
             self.variables.add(node.value.id)
         self.visit(node.value)
@@ -47,13 +40,14 @@ class AwaitMover(ast.NodeTransformer):
         print("\n\nStart of push down class")
         self.external_functions = set(external_functions)
         self.nesting = 0
+        # stores all variable dependencies
         self.var_dependencies = {}
-        self.global_awaits = {}
+        self.all_awaits = set()
     
     def visit_AsyncFunctionDef(self, node):
         self.nesting = 0
         self.var_dependencies.clear()
-        self.global_awaits.clear()
+        self.all_awaits = set()
         
         # get comments
         docstring = ast.get_docstring(node)
@@ -65,89 +59,122 @@ class AwaitMover(ast.NodeTransformer):
         return node
     
     def process_body(self, body):
-        print("\n\nAt the top of body, reset all")
         self.nesting += 1
-        local_awaits = {}
+        # local_awaits = set()
+        # grab for all possible dependencies
+        # pass this as a set
+        current_awaits = self.all_awaits.copy()
+        local_awaits =set()
+        print("\n\nDepth ", self.nesting, "Local awaits ", local_awaits)
+        print("Starting process body ", self.all_awaits)
+
         temp_body = []
         final_body = []
         
         for stmt in body:
             stmt = self.visit(stmt)
-
             variables_used = get_variables_used(stmt)
 
+            print("VARIABLES USED AT THIS LINE", variables_used)
+
             if self.is_await_call(stmt):
+
+                print("existing all awaits", self.all_awaits)
+                self.all_awaits.add(stmt)
+                print("updating self.all_awaits", self.all_awaits)
+
                 await_variable_name = self.get_await_variable_name(stmt)
-                print("Adding await call", await_variable_name)
-                self.global_awaits[await_variable_name] = stmt
-                local_awaits[await_variable_name] = stmt
-                print("Hit await first time ", await_variable_name)
-            elif variables_used.intersection(self.global_awaits.keys()):
-                final_body.extend(temp_body)
-                variables_remove = variables_used.intersection(self.global_awaits.keys())
-                print("Found dependency", variables_remove)
-                print("Current local await", local_awaits)
+                print("Found await call", await_variable_name, stmt)
+                self.var_dependencies[await_variable_name] = stmt
 
-                for variable_name in variables_remove:
-                    final_body.append(self.global_awaits[variable_name])
+                current_awaits.add(stmt)
+
+                local_awaits.add(stmt)
+
+            elif variables_used.intersection(self.var_dependencies.keys()):
+                # dependency is found
+                print("Dependency is found")
+                final_body.extend(temp_body)
+
+                variables_to_remove = variables_used.intersection(self.var_dependencies.keys())
+                
+                for variable_name in variables_to_remove:
+                    stmt_append = self.var_dependencies[variable_name]
+                    final_body.append(stmt_append)
+
+                    # we don't want to dump this at the end
+                    current_awaits.discard(stmt_append)
+                    local_awaits.discard(stmt_append)
+
+                    # if this is main level, we can be sure we awaited the whole dependency
                     if self.nesting == 1:
-                        del self.global_awaits[variable_name]
-                        print("removing", self.global_awaits)
-                    if variable_name in local_awaits:
-                        del local_awaits[variable_name]
+                        del self.var_dependencies[variable_name]
+                print("all awaits after doing removal", self.all_awaits)
                 temp_body = []
 
-                # don't have anything after a return statements
-                if self.nesting == 1 and self.is_return_statement(stmt):
-                    print("last return statement")
-                    final_body.extend(self.global_awaits.values())
-                    self.global_awaits.clear()
-                    local_awaits = {}
+                if self.is_return_statement(stmt):
+                    print("return dependent line")
+                    print("Dump awaits - return", current_awaits)
+                    final_body.extend(temp_body)
+
+                    # dump current awaits
+                    awaits_to_add = list(current_awaits)
+                    final_body.extend(awaits_to_add)
+
+                    # if main execution level, this is last return
+                    if self.nesting == 1:
+                        print("Dependent reutrn ")
+                        self.var_dependencies.clear()
+                        self.all_awaits = set()
+                    
+                    current_awaits = set()
+                    local_awaits = set()
+                    temp_body = []
+
                 final_body.append(stmt)
-            elif self.is_external_function_call(stmt):
-                # If we hit an external function call, process collected calls
+            elif self.is_return_statement(stmt) or self.is_external_function_call(stmt):
+                print("This is a return statement")
+                print("Dump awaits - return", current_awaits)
                 final_body.extend(temp_body)
-                final_body.extend(self.global_awaits.values())
-                self.global_awaits.clear()
-                local_awaits = {}
+
+                awaits_to_add = list(current_awaits)
+                final_body.extend(awaits_to_add)
                 final_body.append(stmt)
-                temp_body = []
-            elif self.is_return_statement(stmt):
-                print("This is a return statement", self.nesting)
-                final_body.extend(temp_body)
-                final_body.extend(self.global_awaits.values())
-                final_body.append(stmt)
+
                 if self.nesting == 1:
-                    self.global_awaits.clear()
-                local_awaits = {}
+                    print("clearing all")
+                    self.var_dependencies.clear()
+                    self.all_awaits = set()
+                current_awaits = set()
+                local_awaits = set()
                 temp_body = []
             else:
-                stmt = self.visit(stmt)
                 temp_body.append(stmt)
-
         # Combine the processed statements
         final_body.extend(temp_body)
 
-        print("Finished local, extending awaits", local_awaits.keys())
-        
-        final_body.extend(local_awaits.values())
+        print("Finished local, dumping awaits", local_awaits)
+        final_body.extend(local_awaits)
+        # update await
+        print("self.all_awaits ", self.all_awaits)
+        for awt in local_awaits:
+            print("discarding", awt)
+            print("COMPARE",awt,self.all_awaits)
+            self.all_awaits.discard(awt)
+            current_awaits.discard(awt)
 
-        common_keys = set(self.global_awaits.keys()).intersection(local_awaits.keys())
+            await_variable_name = self.get_await_variable_name(awt)
+            del self.var_dependencies[await_variable_name]
+        print("status of all awaits", self.all_awaits)
+        local_awaits = set()
 
-        # Remove these keys from dict1
-        for key in common_keys:
-            del self.global_awaits[key]
-        
-        local_awaits = {}
-
-        # print("Current body nesting level", self.nesting, self.global_awaits)
         if self.nesting == 1:
-            print('End of body, returning global', self.global_awaits.values())
-            final_body.extend(self.global_awaits.values())
-            self.global_awaits.clear()
-            
-        self.nesting -= 1 
-        print("Returning final body")
+            print("nesting is 1, clearing all")
+            final_body.extend(current_awaits)
+            self.var_dependencies.clear()
+            self.all_awaits = set()
+
+        self.nesting -= 1
         return final_body
 
     def get_await_variable_name(self, stmt):
