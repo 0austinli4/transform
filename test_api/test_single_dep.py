@@ -1,14 +1,12 @@
 def test():
     '''
-    Check that dependent results used inside a control flow are awaited
+    Check that dependent results used inside a comparison
     '''
     x = get('key')
-    
-    # await should be inside of the if statements
-    if temp:
-        result = get(x)
+    result = None
+    if x:
+        placeholder_code()
     else:
-        get('key_2')
-    if result:
+        result = get('key_2')
         return result
-    return ' '
+    return result

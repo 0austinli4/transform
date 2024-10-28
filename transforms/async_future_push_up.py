@@ -36,7 +36,6 @@ def get_assignment_targets(stmt):
 
 class AsyncFuturePushUp(ast.NodeTransformer):
     def __init__(self, external_functions):
-        print("\n\nStart of push up class")
         self.external_functions = external_functions
 
     def visit_AsyncFunctionDef(self, node):
@@ -67,9 +66,6 @@ class AsyncFuturePushUp(ast.NodeTransformer):
             if self.is_ensure_future_call(stmt):
                 variables_used = get_variables_used(stmt)
 
-                # print("\n\n VARIABLES USED", variables_used)
-                # print("VARIABLES PRODUCED", vars_produced)
-
                 new_body = []
 
                 if variables_used.intersection(vars_produced):
@@ -97,14 +93,11 @@ class AsyncFuturePushUp(ast.NodeTransformer):
                 targets = get_assignment_targets(stmt)
                 vars_produced.update(targets)
                 temp_body.append(stmt)
-            
         # Combine the processed statements
         # processed_body = ensure_future_calls + other_statements
         final_body.extend(future_calls)
         final_body.extend(temp_body)
         # Add the return statement if it exists
-        # if return_stmt:
-        #     processed_body.append(return_stmt)
         return final_body
     
     def process_deps(self, temp_body, stmt):

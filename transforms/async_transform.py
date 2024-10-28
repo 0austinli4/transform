@@ -239,22 +239,17 @@ def async_form(source_code, async_calls):
     return new_source_code, external_function_calls
 
 def main():
-    # Set up argparse to handle command line arguments for multiple input files
     parser = argparse.ArgumentParser(description="Transform 'get' and 'set' calls into async 'await' calls.")
     parser.add_argument('input_files', nargs='+', help="The Python file(s) to transform")
     parser.add_argument('methods', help="Comma-separated list of methods to transform")
 
     args = parser.parse_args()
     async_calls = [method.strip() for method in args.methods.split(',')]
-    # Ensure output directory exists
     output_dir = os.path.join('output')
     os.makedirs(output_dir, exist_ok=True)
 
     for input_file in args.input_files:
-        # Collect top-level functions
         collect_top_level_functions(input_file)
-        print(f"Top-level functions from {input_file}:")
-        print(", ".join(async_calls))
         with open(input_file, 'r') as f:
             source_code = f.read()
 
@@ -272,12 +267,6 @@ def main():
         
         with open(output_file_path, 'w') as f:
             f.write(new_source_code)
-
-        print(f"Transformed code has been written to {output_file_path}.")
-        
-        # Print the collected variables
-        print("Variables assigned to asyncio.ensure_future calls:")
-        print(", ".join(transformer.ensure_future_vars))
 
 if __name__ == "__main__":
     main()

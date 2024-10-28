@@ -8,6 +8,11 @@ class VariableCollector(ast.NodeVisitor):
         self.variables = set()
 
     def visit_Call(self, node):
+        # Check if the function call is a method call on an object
+        if isinstance(node.func, ast.Attribute):
+            # If it's an attribute, add the object being called
+            self.visit(node.func.value)
+
         for arg in node.args:
             self.visit(arg)
         for keyword in node.keywords:
@@ -37,7 +42,6 @@ def get_variables_used(stmt):
 
 class AwaitMover(ast.NodeTransformer):
     def __init__(self, external_functions):
-        print("\n\nStart of push down class")
         self.external_functions = set(external_functions)
         self.nesting = 0
         # stores all variable dependencies
@@ -65,9 +69,7 @@ class AwaitMover(ast.NodeTransformer):
         # pass this as a set
         current_awaits = self.all_awaits.copy()
         local_awaits =set()
-        print("\n\nDepth ", self.nesting, "Local awaits ", local_awaits)
-        print("Starting process body ", self.all_awaits)
-
+        
         temp_body = []
         final_body = []
         
@@ -75,16 +77,11 @@ class AwaitMover(ast.NodeTransformer):
             stmt = self.visit(stmt)
             variables_used = get_variables_used(stmt)
 
-            print("VARIABLES USED AT THIS LINE", variables_used)
-
             if self.is_await_call(stmt):
 
-                print("existing all awaits", self.all_awaits)
                 self.all_awaits.add(stmt)
-                print("updating self.all_awaits", self.all_awaits)
 
                 await_variable_name = self.get_await_variable_name(stmt)
-                print("Found await call", await_variable_name, stmt)
                 self.var_dependencies[await_variable_name] = stmt
 
                 current_awaits.add(stmt)
@@ -92,8 +89,6 @@ class AwaitMover(ast.NodeTransformer):
                 local_awaits.add(stmt)
 
             elif variables_used.intersection(self.var_dependencies.keys()):
-                # dependency is found
-                print("Dependency is found")
                 final_body.extend(temp_body)
 
                 variables_to_remove = variables_used.intersection(self.var_dependencies.keys())
@@ -106,15 +101,15 @@ class AwaitMover(ast.NodeTransformer):
                     current_awaits.discard(stmt_append)
                     local_awaits.discard(stmt_append)
 
+                    print("Found dependency", variable_name, self.nesting)
+
                     # if this is main level, we can be sure we awaited the whole dependency
                     if self.nesting == 1:
                         del self.var_dependencies[variable_name]
-                print("all awaits after doing removal", self.all_awaits)
+                        print("Deleted", variable_name)
                 temp_body = []
 
                 if self.is_return_statement(stmt):
-                    print("return dependent line")
-                    print("Dump awaits - return", current_awaits)
                     final_body.extend(temp_body)
 
                     # dump current awaits
@@ -123,7 +118,6 @@ class AwaitMover(ast.NodeTransformer):
 
                     # if main execution level, this is last return
                     if self.nesting == 1:
-                        print("Dependent reutrn ")
                         self.var_dependencies.clear()
                         self.all_awaits = set()
                     
@@ -133,8 +127,6 @@ class AwaitMover(ast.NodeTransformer):
 
                 final_body.append(stmt)
             elif self.is_return_statement(stmt) or self.is_external_function_call(stmt):
-                print("This is a return statement")
-                print("Dump awaits - return", current_awaits)
                 final_body.extend(temp_body)
 
                 awaits_to_add = list(current_awaits)
@@ -142,7 +134,6 @@ class AwaitMover(ast.NodeTransformer):
                 final_body.append(stmt)
 
                 if self.nesting == 1:
-                    print("clearing all")
                     self.var_dependencies.clear()
                     self.all_awaits = set()
                 current_awaits = set()
@@ -153,23 +144,17 @@ class AwaitMover(ast.NodeTransformer):
         # Combine the processed statements
         final_body.extend(temp_body)
 
-        print("Finished local, dumping awaits", local_awaits)
         final_body.extend(local_awaits)
-        # update await
-        print("self.all_awaits ", self.all_awaits)
+
         for awt in local_awaits:
-            print("discarding", awt)
-            print("COMPARE",awt,self.all_awaits)
             self.all_awaits.discard(awt)
             current_awaits.discard(awt)
 
             await_variable_name = self.get_await_variable_name(awt)
             del self.var_dependencies[await_variable_name]
-        print("status of all awaits", self.all_awaits)
         local_awaits = set()
 
         if self.nesting == 1:
-            print("nesting is 1, clearing all")
             final_body.extend(current_awaits)
             self.var_dependencies.clear()
             self.all_awaits = set()
@@ -209,49 +194,6 @@ class AwaitMover(ast.NodeTransformer):
             else:
                 node.orelse = self.process_body(node.orelse)
         return node
-
-    # def visit_If(self, node):
-    #     node.body = self.process_body(node.body)
-    #     if node.orelse:
-    #         if isinstance(node.orelse[0], ast.If):
-    #             node.orelse = [self.visit(node.orelse[0])]
-    #         else:
-    #             node.orelse = self.process_body(node.orelse)
-    #     # node.orelse = self.process_body(node.orelse)
-    #     return node
-
-
-    # def visit_Call(self, node):
-    #     if isinstance(node.func, ast.Attribute) and node.func.attr == 'ensure_future':
-    #         if isinstance(node.args[0], ast.Call):
-    #             var_name = self.get_assigned_var(node)
-    #             if var_name:
-    #                 self.current_scope[var_name] = ast.Await(value=node.args[0])
-    #     return node
-
-    # def get_assigned_var(self, node):
-    #     parent = self.parent_map.get(node)
-    #     if isinstance(parent, ast.Assign) and len(parent.targets) == 1:
-    #         target = parent.targets[0]
-    #         if isinstance(target, ast.Name):
-    #             return target.id
-    #     return None
-
-    # def insert_awaits(self, body):
-    #     new_body = []
-    #     for stmt in body:
-    #         new_body.append(stmt)
-    #         if isinstance(stmt, ast.Assign) and isinstance(stmt.targets[0], ast.Name):
-    #             var_name = stmt.targets[0].id
-    #             if var_name in self.current_scope:
-    #                 new_body.append(ast.Expr(value=self.current_scope[var_name]))
-    #                 del self.current_scope[var_name]
-    #     return new_body
-
-    # def visit(self, node):
-    #     self.parent_map = {child: node for child in ast.walk(node) for node in ast.walk(child)}
-    #     return super().visit(node)
-
 
 def main():
     parser = argparse.ArgumentParser(description="Transform async code to append all awaits at the bottom.")
