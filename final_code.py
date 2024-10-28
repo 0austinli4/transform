@@ -168,27 +168,28 @@ in order)"""
     y = await future_0
     return True
 
-async def invocation_order_inside_tests():
-    """Check other types of tests(deps) when placing between external invocations"""
+def invocation_order_inside_tests():
+    """
+    Check other types of tests(deps) when placing between external invocations
+    """
     send_user_message()
-    future_0 = asyncio.ensure_future(get('key'))
     if placeholder_code():
         placeholder_code()
+    future_0 = asyncio.ensure_future(get('key'))
+    y = await future_0
     if res:
         placeholder_code()
-    y = await future_0
     send_user_message()
     placeholder_code(x)
     send_user_message()
     future_1 = asyncio.ensure_future(get('key'))
-    result = None
     x = await future_1
+    result = None
     if x:
         placeholder_code()
     else:
         future_2 = asyncio.ensure_future(get('key_2'))
         result = await future_2
-        x = await future_1
         return result
     send_user_message()
     return True
@@ -230,6 +231,15 @@ def consistency_res():
     x = await future_0
     future_1 = asyncio.ensure_future(get('key'))
     x = await future_1
+    return True
+
+def consistency_res():
+    """
+    two results are named the same  - make sure both are awaited
+    """
+    future_0 = asyncio.ensure_future(get('key'))
+    x, y = await future_0
+    placeholder_code(x)
     return True
 
 @decorator

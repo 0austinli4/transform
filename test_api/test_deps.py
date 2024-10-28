@@ -271,6 +271,16 @@ def consistency_res():
     
     return True
 
+### Check multiple variables can be assigned as inputs and ouptuts to functions
+def consistency_res():
+    '''
+    two results are named the same  - make sure both are awaited
+    '''
+    x, y = get('key')   
+    placeholder_code(x)
+    
+    return True
+
 @decorator
 def send_user_message(message):
     print(f"User message: {message}")

@@ -194,7 +194,7 @@ async def invocation_order_with_deps():
     placeholder_code(x)
     return True
 
-async def invocation_order_inside_tests():
+def invocation_order_inside_tests():
     """
     Check other types of tests(deps) when placing between external invocations
     """
@@ -257,6 +257,15 @@ def consistency_res():
     x = await future_0
     future_1 = asyncio.ensure_future(get('key'))
     x = await future_1
+    return True
+
+def consistency_res():
+    """
+    two results are named the same  - make sure both are awaited
+    """
+    future_0 = asyncio.ensure_future(get('key'))
+    x, y = await future_0
+    placeholder_code(x)
     return True
 
 @decorator
