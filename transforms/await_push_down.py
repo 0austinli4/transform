@@ -58,7 +58,7 @@ class AwaitMover(ast.NodeTransformer):
         if docstring:
             node.body = [stmt for stmt in node.body if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Str))]
             node.body.insert(0, ast.Expr(ast.Str(s=docstring)))
-        
+    
         node.body = self.process_body(node.body)
         return node
     
@@ -81,8 +81,10 @@ class AwaitMover(ast.NodeTransformer):
 
                 self.all_awaits.add(stmt)
 
-                await_variable_name = self.get_await_variable_name(stmt)
-                self.var_dependencies[await_variable_name] = stmt
+                await_variable_names = self.get_await_variable_name(stmt)
+
+                for name in await_variable_names:
+                    self.var_dependencies[name] = stmt
 
                 current_awaits.add(stmt)
 
@@ -101,12 +103,12 @@ class AwaitMover(ast.NodeTransformer):
                     current_awaits.discard(stmt_append)
                     local_awaits.discard(stmt_append)
 
-                    print("Found dependency", variable_name, self.nesting)
+                    # print("Found dependency", variable_name, self.nesting)
 
                     # if this is main level, we can be sure we awaited the whole dependency
                     if self.nesting == 1:
                         del self.var_dependencies[variable_name]
-                        print("Deleted", variable_name)
+                        # print("Deleted", variable_name)
                 temp_body = []
 
                 if self.is_return_statement(stmt):
@@ -151,7 +153,8 @@ class AwaitMover(ast.NodeTransformer):
             current_awaits.discard(awt)
 
             await_variable_name = self.get_await_variable_name(awt)
-            del self.var_dependencies[await_variable_name]
+            for name in await_variable_name:
+                del self.var_dependencies[name]
         local_awaits = set()
 
         if self.nesting == 1:
@@ -163,12 +166,19 @@ class AwaitMover(ast.NodeTransformer):
         return final_body
 
     def get_await_variable_name(self, stmt):
+        # Check for assignment statements where the value is an await expression
         if isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Await):
-            if isinstance(stmt.targets[0], ast.Name):
-                return stmt.targets[0].id
+            target = stmt.targets[0]
+            if isinstance(target, ast.Name):
+                return [target.id]
+            elif isinstance(target, ast.Tuple):  # Handle tuple assignments
+                return [name.id for name in target.elts if isinstance(name, ast.Name)]
+            elif isinstance(target, ast.Attribute):  # Handle attributes, e.g., obj.attr = await ...
+                return [target.attr]
+        # Check for expression statements where the expression is an await
         elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Await):
             if isinstance(stmt.value.value, ast.Name):
-                return stmt.value.value.id
+                return [stmt.value.value.id]
         return None
 
     def is_await_call(self, node):

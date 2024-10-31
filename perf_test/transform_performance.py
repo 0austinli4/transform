@@ -5,7 +5,7 @@ import numpy as np
 users = ['austin', 'bob', 'mark', 'susan']
 
 def get(user):
-    time.sleep(3)  # Simulates a delay of 5 seconds
+    time.sleep(3)  # Simulates a delay of 3 seconds
     return "Task Result"
 
 def put(value):

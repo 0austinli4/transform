@@ -1,12 +1,10 @@
-def test():
-    '''
-    Check that dependent results used inside a comparison
-    '''
+def main_method():
+    sub_method()
+    placeholder_code()
     x = get('key')
-    result = None
-    if x:
-        placeholder_code()
-    else:
-        result = get('key_2')
-        return result
-    return result
+    placeholder_code()
+    return
+
+def sub_method():
+    get('A')
+    return
