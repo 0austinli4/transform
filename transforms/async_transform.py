@@ -1,6 +1,7 @@
 import ast
 import argparse
 import os
+from .function_finder import find_functions_with_calls
 
 class FunctionCollector(ast.NodeVisitor):
     def __init__(self):
@@ -13,7 +14,8 @@ class FunctionCollector(ast.NodeVisitor):
             self.decorated_functions.add(node.name)
 
 class AsyncTransformer(ast.NodeTransformer):
-    def __init__(self, async_calls):
+    def __init__(self, functions_calling_async,  async_calls):
+        self.functions_calling_async = set(functions_calling_async)
         self.async_calls = set(async_calls)
         self.transformed_functions = set()
         self.temp_var_counter = 0
@@ -22,7 +24,7 @@ class AsyncTransformer(ast.NodeTransformer):
     def visit_FunctionDef(self, node):
         self.temp_var_counter = 0
         self.future_counter = 0
-        if node.name in self.async_calls:
+        if node.name in self.functions_calling_async:
             self.transformed_functions.add(node.name)
             new_body = []
             for stmt in node.body:
@@ -31,6 +33,7 @@ class AsyncTransformer(ast.NodeTransformer):
                     new_body.extend(result)
                 else:
                     new_body.append(result)
+
             return ast.AsyncFunctionDef(
                 name=node.name,
                 args=node.args,
@@ -221,7 +224,7 @@ def collect_top_level_functions(source_code):
     return list(collector.decorated_functions)
 
 
-def async_form(source_code, async_calls):
+def async_form(source_code, functions_calling_async, async_calls):
     external_function_calls = collect_top_level_functions(source_code)
 
     tree = ast.parse(source_code)
@@ -230,7 +233,7 @@ def async_form(source_code, async_calls):
     asyncio_import = ast.Import(names=[ast.alias(name='asyncio', asname=None)])
     tree.body.insert(0, asyncio_import)
 
-    transformer = AsyncTransformer(async_calls)
+    transformer = AsyncTransformer(functions_calling_async, async_calls)
     transformed_tree = transformer.visit(tree)
 
     ast.fix_missing_locations(transformed_tree)
@@ -248,10 +251,14 @@ def main():
     output_dir = os.path.join('output')
     os.makedirs(output_dir, exist_ok=True)
 
+
     for input_file in args.input_files:
         collect_top_level_functions(input_file)
         with open(input_file, 'r') as f:
             source_code = f.read()
+    
+
+        print("FUNCTIONS FOUND", functions_we_should_change)
 
         tree = ast.parse(source_code)
 

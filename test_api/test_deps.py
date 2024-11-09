@@ -17,12 +17,18 @@ responses should be restricted by the location of these statements.
 
 '''
 ### Basic tests
+def regular_function():
+    basic_test()
+    placeholder_code()
+
+
 def basic_test():
     '''
     Test that awaits are pushed to bottom, and invocations are pushed to top
     '''
     placeholder_code()
     x = get('key')
+    y = get('key')
     placeholder_code()
     return result
 

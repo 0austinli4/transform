@@ -1,5 +1,4 @@
 import asyncio
-'\nTest file for program transformations\n\nAsync operations: \n    - GET \n\nSync operations:\n    - SYNC_OP\n    - placeholder_code()\n\nplaceholder_code() represents any sequence of code that is not involved in the transformation \ni.e., not dependent code or an async calls. Invocations and responses can freely move\nbetween these portions of code\n\nsend_user_message() represents an externalized function (defined via decoration). Invocations and\nresponses should be restricted by the location of these statements. \n\n'
 
 async def basic_test():
     """Test that awaits are pushed to bottom, and invocations are pushed to top"""

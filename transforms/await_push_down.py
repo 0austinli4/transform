@@ -41,14 +41,23 @@ def get_variables_used(stmt):
     return set(collector.variables)
 
 class AwaitMover(ast.NodeTransformer):
-    def __init__(self, external_functions):
+    def __init__(self, external_functions, async_funcs):
         self.external_functions = set(external_functions)
+        self.async_funcs = async_funcs
         self.nesting = 0
         # stores all variable dependencies
         self.var_dependencies = {}
         self.all_awaits = set()
     
     def visit_AsyncFunctionDef(self, node):
+        if node.name not in self.async_funcs:
+            return node
+
+        is_main_method = any(
+            isinstance(dec, ast.Name) and dec.id == "main_method"
+            for dec in node.decorator_list
+        )
+
         self.nesting = 0
         self.var_dependencies.clear()
         self.all_awaits = set()
@@ -58,15 +67,28 @@ class AwaitMover(ast.NodeTransformer):
         if docstring:
             node.body = [stmt for stmt in node.body if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Str))]
             node.body.insert(0, ast.Expr(ast.Str(s=docstring)))
-    
+
+        pending_awaits_init = ast.Assign(
+            targets=[ast.Name(id='pending_awaits', ctx=ast.Store())],
+            value=ast.List(elts=[], ctx=ast.Load())
+        )
+        node.body.insert(0, pending_awaits_init)
         node.body = self.process_body(node.body)
+        
+        if is_main_method:
+            # Find the return statement
+            for i, stmt in enumerate(node.body):
+                if isinstance(stmt, ast.Return):
+                    # Insert the await loop before the return
+                    node.body.insert(i, self.create_await_loop())
+                    break
+            else:
+                # If no return statement found, append the await loop
+                node.body.append(self.create_await_loop())
         return node
     
     def process_body(self, body):
         self.nesting += 1
-        # local_awaits = set()
-        # grab for all possible dependencies
-        # pass this as a set
         current_awaits = self.all_awaits.copy()
         local_awaits =set()
         
@@ -87,8 +109,33 @@ class AwaitMover(ast.NodeTransformer):
                     self.var_dependencies[name] = stmt
 
                 current_awaits.add(stmt)
-
                 local_awaits.add(stmt)
+            
+            elif self.is_async_function_call(stmt):
+                # Get the function name
+                func_name = stmt.value.func.id
+                # Create new variable name for the pending awaits
+                pending_var = f'pending_awaits_{func_name}'
+                # Transform func() into pending_awaits_func = func()
+                assign_stmt = ast.Assign(
+                    targets=[ast.Name(id=pending_var, ctx=ast.Store())],
+                    value=stmt.value
+                )
+                temp_body.append(assign_stmt)
+                
+                # Add pending_awaits.extend(pending_awaits_func)
+                extend_stmt = ast.Expr(
+                    value=ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Name(id='pending_awaits', ctx=ast.Load()),
+                            attr='extend',
+                            ctx=ast.Load()
+                        ),
+                        args=[ast.Name(id=pending_var, ctx=ast.Load())],
+                        keywords=[]
+                    )
+                )
+                temp_body.append(extend_stmt)
 
             elif variables_used.intersection(self.var_dependencies.keys()):
                 final_body.extend(temp_body)
@@ -103,22 +150,31 @@ class AwaitMover(ast.NodeTransformer):
                     current_awaits.discard(stmt_append)
                     local_awaits.discard(stmt_append)
 
-                    # print("Found dependency", variable_name, self.nesting)
-
                     # if this is main level, we can be sure we awaited the whole dependency
                     if self.nesting == 1:
                         del self.var_dependencies[variable_name]
-                        # print("Deleted", variable_name)
                 temp_body = []
 
                 if self.is_return_statement(stmt):
                     final_body.extend(temp_body)
+                    append_stmt = self.extend_pending_awaits(list(current_awaits))
+                    final_body.append(append_stmt)
 
-                    # dump current awaits
-                    awaits_to_add = list(current_awaits)
-                    final_body.extend(awaits_to_add)
+                    # Create a new return statement that returns pending_awaits
+                    if stmt.value:
+                        stmt.value = ast.Tuple(
+                            elts=[
+                                stmt.value,
+                                ast.Name(id='pending_awaits', ctx=ast.Load())
+                            ],
+                            ctx=ast.Load()
+                        )
+                    else:
+                        # If empty return, just return pending_awaits
+                        stmt.value = ast.Name(id='pending_awaits', ctx=ast.Load())
 
-                    # if main execution level, this is last return
+                    final_body.append(stmt)
+
                     if self.nesting == 1:
                         self.var_dependencies.clear()
                         self.all_awaits = set()
@@ -131,8 +187,15 @@ class AwaitMover(ast.NodeTransformer):
             elif self.is_return_statement(stmt) or self.is_external_function_call(stmt):
                 final_body.extend(temp_body)
 
-                awaits_to_add = list(current_awaits)
-                final_body.extend(awaits_to_add)
+                # awaits_to_add = list(current_awaits)
+                # final_body.extend(awaits_to_add)
+                append_stmt = self.extend_pending_awaits(list(current_awaits))
+                final_body.append(append_stmt)
+
+                if self.is_return_statement(stmt):
+                    # Replace the return value with pending_awaits
+                    stmt.value = ast.Name(id='pending_awaits', ctx=ast.Load())
+
                 final_body.append(stmt)
 
                 if self.nesting == 1:
@@ -146,7 +209,7 @@ class AwaitMover(ast.NodeTransformer):
         # Combine the processed statements
         final_body.extend(temp_body)
 
-        final_body.extend(local_awaits)
+        # final_body.extend(local_awaits)
 
         for awt in local_awaits:
             self.all_awaits.discard(awt)
@@ -158,12 +221,36 @@ class AwaitMover(ast.NodeTransformer):
         local_awaits = set()
 
         if self.nesting == 1:
-            final_body.extend(current_awaits)
+            # final_body.extend(current_awaits)
             self.var_dependencies.clear()
             self.all_awaits = set()
 
+            if not any(isinstance(node, ast.Return) for node in final_body):
+                final_body.append(ast.Return(
+                    value=ast.Name(id='pending_awaits', ctx=ast.Load())
+                ))
+
         self.nesting -= 1
         return final_body
+
+    def extend_pending_awaits(self, awaits):
+        append_stmt = ast.Expr(
+            value=ast.Call(
+                func=ast.Attribute(
+                    value=ast.Name(id='pending_awaits', ctx=ast.Load()),
+                    attr='extend',
+                    ctx=ast.Load()
+                ),
+                args=[
+                    ast.List(
+                        elts=[await_stmt.value.value for await_stmt in awaits],
+                        ctx=ast.Load()
+                    )
+                ],
+                keywords=[]
+            )
+        )
+        return append_stmt
 
     def get_await_variable_name(self, stmt):
         # Check for assignment statements where the value is an await expression
@@ -180,6 +267,12 @@ class AwaitMover(ast.NodeTransformer):
             if isinstance(stmt.value.value, ast.Name):
                 return [stmt.value.value.id]
         return None
+
+    def is_async_function_call(self, stmt):
+        if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+            if isinstance(stmt.value.func, ast.Name):
+                return stmt.value.func.id in self.async_funcs
+        return False
 
     def is_await_call(self, node):
         return (
@@ -204,6 +297,21 @@ class AwaitMover(ast.NodeTransformer):
             else:
                 node.orelse = self.process_body(node.orelse)
         return node
+    
+    def create_await_loop(self):
+        """Creates an AST for looping through and awaiting pending_awaits"""
+        return ast.For(
+            target=ast.Name(id='await_stmt', ctx=ast.Store()),
+            iter=ast.Name(id='pending_awaits', ctx=ast.Load()),
+            body=[
+                ast.Expr(
+                    value=ast.Await(
+                        value=ast.Name(id='await_stmt', ctx=ast.Load())
+                    )
+                )
+            ],
+            orelse=[]
+        )
 
 def main():
     parser = argparse.ArgumentParser(description="Transform async code to append all awaits at the bottom.")
@@ -235,9 +343,9 @@ def main():
 if __name__ == "__main__":
     main()
 
-def await_push(source_code,external_functions):
+def await_push(source_code,external_functions, asnyc_functions):
     tree = ast.parse(source_code)
-    transformer = AwaitMover(external_functions)
+    transformer = AwaitMover(external_functions, asnyc_functions)
     transformer.current_node = tree
     transformed_tree = transformer.visit(tree)
     ast.fix_missing_locations(transformed_tree)
