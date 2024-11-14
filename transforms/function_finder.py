@@ -5,18 +5,23 @@ class CallFinder(ast.NodeVisitor):
         self.target_functions = set(target_functions)
         self.functions_with_calls = set()
         self.current_function = None
+        self.call_graph = {}  # Track function calls
 
     def visit_FunctionDef(self, node):
         previous_function = self.current_function
         self.current_function = node.name
+        self.call_graph[self.current_function] = set()  # Initialize empty set for this function
         self.generic_visit(node)
         self.current_function = previous_function
 
     def visit_Call(self, node):
         if self.current_function:  # Only check if we're inside a function
             func_name = self.get_func_name(node)
-            if func_name in self.target_functions:
-                self.functions_with_calls.add(self.current_function)
+            if func_name:
+                # Add to call graph
+                self.call_graph[self.current_function].add(func_name)
+                if func_name in self.target_functions:
+                    self.functions_with_calls.add(self.current_function)
         self.generic_visit(node)
 
     def get_func_name(self, node):
@@ -26,18 +31,28 @@ class CallFinder(ast.NodeVisitor):
             return node.func.attr
         return None
 
-def find_functions_with_calls(source_code, target_functions):
-    """
-    Returns a list of function names that contain calls to any of the target functions.
-    
-    Args:
-        source_code (str): The Python source code to analyze
-        target_functions (list): List of function names to look for
+    def find_all_callers(self):
+        """Find all functions in the call chain that eventually lead to target functions"""
+        result = set()
+        work_list = list(self.functions_with_calls)
         
-    Returns:
-        list: Names of functions that call any of the target functions
-    """
-    tree = ast.parse(source_code)
+        # Keep processing until no new functions are found
+        while work_list:
+            current = work_list.pop()
+            result.add(current)
+            
+            # Find all functions that call the current function
+            for func, calls in self.call_graph.items():
+                if current in calls and func not in result:
+                    work_list.append(func)
+        
+        return result
+
+def find_functions_with_calls(source_code, target_functions):
+    if isinstance(source_code, str):
+        tree = ast.parse(source_code)
+    else:
+        tree = source_code  # Assume it's already an AST
     finder = CallFinder(target_functions)
     finder.visit(tree)
-    return list(finder.functions_with_calls)
+    return finder.find_all_callers()

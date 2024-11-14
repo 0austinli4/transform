@@ -1,7 +1,8 @@
 import ast
 import argparse
 import os
-from .await_push_down import get_variables_used
+from .naive_await_push_down import get_variables_used
+
 
 class AssignmentTargetCollector(ast.NodeVisitor):
     def __init__(self):
@@ -29,23 +30,25 @@ class AssignmentTargetCollector(ast.NodeVisitor):
         for elt in node.elts:
             self.visit(elt)
 
+
 def get_assignment_targets(stmt):
     collector = AssignmentTargetCollector()
     collector.visit(stmt)
     return set(collector.targets)
 
+
 class AsyncFuturePushUp(ast.NodeTransformer):
     def __init__(self, external_functions):
         self.external_functions = external_functions
 
-    def visit_AsyncFunctionDef(self, node):
+    def visit_FunctionDef(self, node):
         docstring = ast.get_docstring(node)
         if docstring:
             node.body = [ast.Expr(ast.Str(s=docstring))] + self.process_body(node.body)
         else:
             node.body = self.process_body(node.body)
         return node
-    
+
     def visit_If(self, node):
         node.body = self.process_body(node.body)
         if node.orelse:
@@ -63,10 +66,16 @@ class AsyncFuturePushUp(ast.NodeTransformer):
 
         for stmt in body:
             stmt = self.visit(stmt)
-            if self.is_ensure_future_call(stmt):
+            if isinstance(stmt, ast.If) and self.contains_return(stmt):
+                # If statement with return should be treated like external function call
+                final_body.extend(future_calls)
+                final_body.extend(temp_body)
+                final_body.append(stmt)
+                future_calls = []
+                temp_body = []
+                vars_produced = set()
+            elif self.is_ensure_future_call(stmt):
                 variables_used = get_variables_used(stmt)
-
-                new_body = []
 
                 if variables_used.intersection(vars_produced):
                     temp_body = future_calls + temp_body
@@ -81,7 +90,7 @@ class AsyncFuturePushUp(ast.NodeTransformer):
                 targets = get_assignment_targets(stmt)
                 vars_produced.update(targets)
                 future_calls.append(stmt)
-            elif self.is_external_function_call(stmt):
+            elif self.is_external_function_call(stmt) or self.is_return(stmt):
                 # If we hit an external function call, process collected calls
                 final_body.extend(future_calls)
                 final_body.extend(temp_body)
@@ -99,51 +108,50 @@ class AsyncFuturePushUp(ast.NodeTransformer):
         final_body.extend(temp_body)
         # Add the return statement if it exists
         return final_body
-    
+
     def process_deps(self, temp_body, stmt):
         targets = get_variables_used(stmt)
         latest_insertion_point = -1
-        
+
         for i, temp_stmt in enumerate(temp_body):
             vars_produced = get_assignment_targets(temp_stmt)
             if vars_produced.intersection(targets):
-                latest_insertion_point = i+1
-    
+                latest_insertion_point = i + 1
+
         if latest_insertion_point != -1:
             temp_body.insert(latest_insertion_point, stmt)
         else:
-            raise Exception('no insertion point found')
-        return temp_body  
-        # # If no insertion point found, append the statement to the end
-        # temp_body.append(stmt)
-        # return temp_body
+            raise Exception("no insertion point found")
+        return temp_body
 
     def is_ensure_future_call(self, node):
-        return (isinstance(node, ast.Assign) and
-                isinstance(node.value, ast.Call) and
-                isinstance(node.value.func, ast.Attribute) and
-                node.value.func.attr == 'ensure_future')
+        return (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr == "ensure_future"
+        )
 
     def is_external_function_call(self, node):
-        return (isinstance(node, ast.Expr) and
-                isinstance(node.value, ast.Call) and
-                isinstance(node.value.func, ast.Name) and
-                node.value.func.id in self.external_functions)
+        return (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id in self.external_functions
+        )
 
     def is_await_call(self, node):
-        return (isinstance(node, (ast.Expr, ast.Assign)) and
-                isinstance(getattr(node, 'value', None), ast.Await))
-        
-    
-    # def visit_For(self, node):
-    #     node.body = self.process_body(node.body)
-    #     node.orelse = self.process_body(node.orelse)
-    #     return node
+        return isinstance(node, (ast.Expr, ast.Assign)) and isinstance(
+            getattr(node, "value", None), ast.Await
+        )
 
-    # def visit_While(self, node):
-    #     node.body = self.process_body(node.body)
-    #     node.orelse = self.process_body(node.orelse)
-    #     return node
+    def is_return(self, node):
+        return isinstance(node, ast.Return)
+
+    def contains_return(self, node):
+        """Check if an if statement contains a return statement"""
+        return any(isinstance(stmt, ast.Return) for stmt in ast.walk(node))
+
 
 def async_future(source_code, external_functions):
     tree = ast.parse(source_code)

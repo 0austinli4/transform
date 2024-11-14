@@ -4,7 +4,7 @@ import argparse
 import os
 from transforms.async_transform import async_form
 from transforms.async_future_push_up import async_future
-from transforms.await_push_down import await_push
+from transforms.naive_await_push_down import await_push
 from transforms.function_finder import find_functions_with_calls
 
 

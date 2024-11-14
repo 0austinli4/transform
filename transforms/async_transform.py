@@ -24,7 +24,7 @@ class AsyncTransformer(ast.NodeTransformer):
     def visit_FunctionDef(self, node):
         self.temp_var_counter = 0
         self.future_counter = 0
-        if node.name in self.functions_calling_async:
+        if node.name in self.async_calls:
             self.transformed_functions.add(node.name)
             new_body = []
             for stmt in node.body:
@@ -257,9 +257,6 @@ def main():
         with open(input_file, 'r') as f:
             source_code = f.read()
     
-
-        print("FUNCTIONS FOUND", functions_we_should_change)
-
         tree = ast.parse(source_code)
 
         transformer = AsyncTransformer(async_calls)

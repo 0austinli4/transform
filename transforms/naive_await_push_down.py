@@ -8,9 +8,7 @@ class VariableCollector(ast.NodeVisitor):
         self.variables = set()
 
     def visit_Call(self, node):
-        # Check if the function call is a method call on an object
         if isinstance(node.func, ast.Attribute):
-            # If it's an attribute, add the object being called
             self.visit(node.func.value)
 
         for arg in node.args:
@@ -31,7 +29,6 @@ class VariableCollector(ast.NodeVisitor):
         self.visit(node.value)
 
     def generic_visit(self, node):
-        # Visit all child nodes
         for child in ast.iter_child_nodes(node):
             self.visit(child)
 
@@ -46,23 +43,20 @@ class AwaitMover(ast.NodeTransformer):
     def __init__(self, external_functions, async_funcs):
         self.external_functions = set(external_functions)
         self.async_funcs = async_funcs
-        print(async_funcs)
         self.nesting = 0
         # stores all variable dependencies
         self.var_dependencies = {}
-        self.all_awaits = set()
 
     def visit_FunctionDef(self, node):
+        # we don't need to check nodes that aren't in the set of async functions
         if node.name not in self.async_funcs:
-            print(node.name)
             return node
 
+        # check specifically for main method
         is_main_method = any(
             isinstance(dec, ast.Name) and dec.id == "main_method"
             for dec in node.decorator_list
         )
-
-        self.nesting = 0
         self.var_dependencies.clear()
         self.all_awaits = set()
 
@@ -72,14 +66,12 @@ class AwaitMover(ast.NodeTransformer):
         #     node.body.insert(0, ast.Expr(ast.Str(s=docstring)))
 
         # create array of pending awaits
+        node.body = self.process_body(node.body)
         pending_awaits_init = ast.Assign(
             targets=[ast.Name(id="pending_awaits", ctx=ast.Store())],
-            value=ast.List(elts=[], ctx=ast.Load()),
+            value=ast.Set(elts=[], ctx=ast.Load()),  # This will create just {}
         )
         node.body.insert(0, pending_awaits_init)
-        print("ABOUT TO VISIT BODY")
-        node.body = self.process_body(node.body)
-        print("FINSIHED VISIT BODY")
 
         if is_main_method:
             node = self.handle_main_method(node)
@@ -87,9 +79,6 @@ class AwaitMover(ast.NodeTransformer):
 
     def process_body(self, body):
         self.nesting += 1
-        current_awaits = self.all_awaits.copy()
-        local_awaits = set()
-        temp_body = []
         final_body = []
 
         for stmt in body:
@@ -104,126 +93,105 @@ class AwaitMover(ast.NodeTransformer):
                 for name in await_variable_names:
                     self.var_dependencies[name] = stmt
 
-                current_awaits.add(stmt)
-                local_awaits.add(stmt)
+            elif self.is_ensure_future_call(stmt):
+                assigned_var = stmt.targets[0]
+                append_stmt = ast.Expr(
+                    value=ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Name(id="pending_awaits", ctx=ast.Load()),
+                            attr="add",
+                            ctx=ast.Load(),
+                        ),
+                        args=[assigned_var],
+                        keywords=[],
+                    )
+                )
+                final_body.append(stmt)
+                final_body.append(append_stmt)
 
             elif self.is_async_function_call(stmt):
                 func_name = stmt.value.func.id
-
-                # Create new variable name for the pending awaits
                 pending_var = f"pending_awaits_{func_name}"
 
+                # Assign for pending variable
                 assign_stmts = self.handle_assign(stmt, pending_var)
-
-                # Transform func() into pending_awaits_func = func()
-                temp_body.append(assign_stmts)
+                final_body.append(assign_stmts)
 
                 # Add pending_awaits.extend(pending_awaits_func)
-                extend_stmt = self.extend_statement(pending_var)
-                temp_body.append(extend_stmt)
+                extend_stmt = self.update_statement(pending_var)
+                final_body.append(extend_stmt)
 
-            # dependencies case
             elif variables_used.intersection(self.var_dependencies.keys()):
-                final_body.extend(temp_body)
-
                 variables_to_remove = variables_used.intersection(
                     self.var_dependencies.keys()
                 )
 
                 for variable_name in variables_to_remove:
-                    print("Found a dependency", variable_name, self.nesting)
                     stmt_append = self.var_dependencies[variable_name]
                     final_body.append(stmt_append)
-
-                    # we don't want to dump this at the end
-                    current_awaits.discard(stmt_append)
-                    local_awaits.discard(stmt_append)
-
-                    # if this is main level, we can be sure we awaited the whole dependency
-                    if self.nesting == 1:
-                        print("Deleitng from var depdeneincies")
-                        del self.var_dependencies[variable_name]
-                temp_body = []
-
+                    # Create AST node for `pending_awaits.remove(stmt_append)`
+                    remove_stmt = ast.Expr(
+                        value=ast.Call(
+                            func=ast.Attribute(
+                                value=ast.Name(id="pending_awaits", ctx=ast.Load()),
+                                attr="remove",
+                                ctx=ast.Load(),
+                            ),
+                            args=[
+                                ast.Name(
+                                    id=stmt_append.value.value.id, ctx=ast.Load()
+                                ),  # Pass stmt_id as AST Name node
+                            ],  # Pass variable_name as an AST Name node
+                            keywords=[],
+                        )
+                    )
+                    final_body.append(
+                        remove_stmt
+                    )  # Append remove statement to final_body
                 if self.is_return_statement(stmt):
-                    final_body.extend(temp_body)
-                    if current_awaits:
-                        print("CURRENT AWAITS", current_awaits)
-                        append_stmt = self.extend_pending_awaits(list(current_awaits))
-                        final_body.append(append_stmt)
-
-                    # Create a new return statement that returns pending_awaits
-                    # modify return stmt in place
                     stmt = self.get_return_stmt(stmt)
-
-                    if self.nesting == 1:
-                        self.var_dependencies.clear()
-                        self.all_awaits = set()
-
-                    current_awaits = set()
-                    local_awaits = set()
-                    temp_body = []
-
                 final_body.append(stmt)
 
             elif self.is_return_statement(stmt) or self.is_external_function_call(stmt):
-                final_body.extend(temp_body)
-
-                if current_awaits:
-                    print("CURRENT AWAITS", current_awaits)
-                    append_stmt = self.extend_pending_awaits(list(current_awaits))
-                    final_body.append(append_stmt)
-
                 if self.is_return_statement(stmt):
                     stmt = self.get_return_stmt(stmt)
 
                 final_body.append(stmt)
-
-                if self.nesting == 1:
-                    self.var_dependencies.clear()
-                    self.all_awaits = set()
-
-                current_awaits = set()
-                local_awaits = set()
-                temp_body = []
             else:
-                temp_body.append(stmt)
+                final_body.append(stmt)
         # Combine the processed statements
-        final_body.extend(temp_body)
-        # TODO: extend this here or as part of the awaits ??
-        if self.nesting == 1 and local_awaits:
-            print("CURRENT AWAITS", current_awaits)
-            append_stmt = self.extend_pending_awaits(list(current_awaits))
-            final_body.append(append_stmt)
-        else:
-            final_body.extend(local_awaits)
-
-        for awt in local_awaits:
-            self.all_awaits.discard(awt)
-            current_awaits.discard(awt)
-            await_variable_name = self.get_await_variable_name(awt)
-            for name in await_variable_name:
-                del self.var_dependencies[name]
-
-        local_awaits = set()
-
         # extend all remaining current awaits
-        if self.nesting == 1:
-            if current_awaits:
-                print("CURRENT AWAITS", current_awaits)
-                append_stmt = self.extend_pending_awaits(list(current_awaits))
-                final_body.append(append_stmt)
 
-            self.var_dependencies.clear()
-            self.all_awaits = set()
-
-            if not any(isinstance(node, ast.Return) for node in final_body):
-                final_body.append(
-                    ast.Return(value=ast.Name(id="pending_awaits", ctx=ast.Load()))
+        if (
+            not any(isinstance(node, ast.Return) for node in final_body)
+            and self.nesting == 1
+        ):
+            final_body.append(
+                ast.Return(
+                    value=ast.Tuple(
+                        elts=[
+                            ast.Name(id="pending_awaits", ctx=ast.Load()),
+                            ast.Constant(value=None),
+                        ],
+                        ctx=ast.Load(),
+                    ),
+                    ctx=ast.Load(),
                 )
-
+            )
         self.nesting -= 1
         return final_body
+
+    def is_ensure_future_call(self, node):
+        if isinstance(node, ast.Assign):
+            node = node.value
+            return (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "asyncio"
+                and node.func.attr == "ensure_future"
+            )
+        return False
 
     def get_return_stmt(self, stmt):
         if stmt.value:
@@ -232,28 +200,15 @@ class AwaitMover(ast.NodeTransformer):
                 ctx=ast.Load(),
             )
         else:
-            # If empty return, just return pending_awaits
-            stmt.value = ast.Name(id="pending_awaits", ctx=ast.Load())
-        return stmt
-
-    def extend_pending_awaits(self, awaits):
-        append_stmt = ast.Expr(
-            value=ast.Call(
-                func=ast.Attribute(
-                    value=ast.Name(id="pending_awaits", ctx=ast.Load()),
-                    attr="extend",
-                    ctx=ast.Load(),
-                ),
-                args=[
-                    ast.List(
-                        elts=[await_stmt.value.value for await_stmt in awaits],
-                        ctx=ast.Load(),
-                    )
+            # If empty return, return tuple (pending_awaits, None)
+            stmt.value = ast.Tuple(
+                elts=[
+                    ast.Name(id="pending_awaits", ctx=ast.Load()),
+                    ast.Constant(value=None),
                 ],
-                keywords=[],
+                ctx=ast.Load(),
             )
-        )
-        return append_stmt
+        return stmt
 
     def get_await_variable_name(self, stmt):
         # Check for assignment statements where the value is an await expression
@@ -375,11 +330,20 @@ class AwaitMover(ast.NodeTransformer):
         else:
             # Case where function call is just an expression
             assign_stmt = ast.Assign(
-                targets=[ast.Name(id=pending_var, ctx=ast.Store())], value=stmt.value
+                targets=[
+                    ast.Tuple(
+                        elts=[
+                            ast.Name(id=pending_var, ctx=ast.Store()),
+                            ast.Name(id="_", ctx=ast.Store()),
+                        ],
+                        ctx=ast.Store(),
+                    )
+                ],
+                value=stmt.value,
             )
             return assign_stmt
 
-    def extend_statement(self, pending_var):
+    def update_statement(self, pending_var):
         return ast.Expr(
             value=ast.Call(
                 func=ast.Attribute(
