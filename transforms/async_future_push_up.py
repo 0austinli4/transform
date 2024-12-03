@@ -63,8 +63,9 @@ class AsyncFuturePushUp(ast.NodeTransformer):
 
         for stmt in body:
             stmt = self.visit(stmt)
-            if self.is_ensure_future_call(stmt):
+            if self.is_app_request_call(stmt):
                 variables_used = get_variables_used(stmt)
+                
 
                 new_body = []
 
@@ -77,7 +78,7 @@ class AsyncFuturePushUp(ast.NodeTransformer):
                     future_calls = []
                 else:
                     future_calls.append(stmt)
-            elif self.is_await_call(stmt):
+            elif self.is_app_response_call(stmt):
                 targets = get_assignment_targets(stmt)
                 vars_produced.update(targets)
                 future_calls.append(stmt)
@@ -123,6 +124,28 @@ class AsyncFuturePushUp(ast.NodeTransformer):
                 isinstance(node.value, ast.Call) and
                 isinstance(node.value.func, ast.Attribute) and
                 node.value.func.attr == 'ensure_future')
+
+    def is_app_response_call(self, node):
+        # Check for expression statements
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            if isinstance(node.value.func, ast.Name):
+                return node.value.func.id == 'AppResponse'
+        # Check for assignments where the value is an AppResponse call
+        elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            if isinstance(node.value.func, ast.Name):
+                return node.value.func.id == 'AppResponse'
+        return False
+
+    def is_app_request_call(self, node):
+        # Check for expression statements
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            if isinstance(node.value.func, ast.Name):
+                return node.value.func.id == 'AppRequest'
+        # Check for assignments where the value is an AppRequest call
+        elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            if isinstance(node.value.func, ast.Name):
+                return node.value.func.id == 'AppRequest'
+        return False
 
     def is_external_function_call(self, node):
         return (isinstance(node, ast.Expr) and

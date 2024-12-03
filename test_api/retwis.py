@@ -9,10 +9,10 @@ class Timeline:
   def page(self,page):
     _from = (page-1)*10
     _to = (page)*10
-    post_returns = []
+    posts = []
     for post_id in r.lrange('timeline',_from,_to):
-      post_returns.append(Post(post_id))
-    return post_returns
+      posts.append(Post(post_id))
+    return posts
 
 class Model(object):
   def __init__(self,id):

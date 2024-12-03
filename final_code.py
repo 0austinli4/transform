@@ -1,249 +1,293 @@
 import asyncio
-'\nTest file for program transformations\n\nAsync operations: \n    - GET \n\nSync operations:\n    - SYNC_OP\n    - placeholder_code()\n\nplaceholder_code() represents any sequence of code that is not involved in the transformation \ni.e., not dependent code or an async calls. Invocations and responses can freely move\nbetween these portions of code\n\nsend_user_message() represents an externalized function (defined via decoration). Invocations and\nresponses should be restricted by the location of these statements. \n\n'
+import redis
+import re
+import settings
+r = settings.r
 
-async def basic_test():
-    """Test that awaits are pushed to bottom, and invocations are pushed to top"""
-    future_0 = asyncio.ensure_future(get('key'))
-    placeholder_code()
-    placeholder_code()
-    x = await future_0
-    return result
+class Timeline:
 
-async def basic_test_dep_await():
-    """Test that awaits only get pushed down until dependency"""
-    future_0 = asyncio.ensure_future(get('key'))
-    placeholder_code()
-    x = await future_0
-    result = sync_op(x)
-    return result
+    def page(self, page):
+        pending_awaits = {*()}
+        _from = (page - 1) * 10
+        _to = page * 10
+        posts = []
+        future_0 = AppRequest('PANIC', 'timeline', _from, _to)
+        pending_awaits.add(future_0)
+        async_iter_0 = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        for post_id in async_iter_0:
+            posts.append(Post(post_id))
+        return (pending_awaits, posts)
 
-async def basic_test_dep_invoke():
-    """Test that async invocation only get pushed up until production of dependent variable"""
-    x = sync_op('key')
-    future_0 = asyncio.ensure_future(get(x))
-    placeholder_code()
-    result = await future_0
-    return result
+class Model(object):
 
-async def basic_test_dep_asyncs():
-    """Test that async invocation only get pushed up until 
-production of dependent variable with another async"""
-    future_0 = asyncio.ensure_future(get('key'))
-    y = await future_0
-    future_1 = asyncio.ensure_future(get(y))
-    placeholder_code()
-    result = await future_1
-    return result
+    def __init__(self, id):
+        self.__dict__['id'] = id
 
-async def basic_test_externalizing_order():
-    """Test ordering with external functions"""
-    future_0 = asyncio.ensure_future(get('key'))
-    placeholder_code()
-    y = await future_0
-    send_user_message()
-    future_1 = asyncio.ensure_future(get(y))
-    placeholder_code()
-    placeholder_code()
-    z = await future_1
+    def __eq__(self, other):
+        return self.id == other.id
 
-async def basic_test_control_flow():
-    """Check that awaits and invocations can move past control flow statements"""
-    future_0 = asyncio.ensure_future(get('key'))
-    if placeholder_code():
-        placeholder_code()
-    if res:
-        placeholder_code()
-    y = await future_0
-    return True
+    def __setattr__(self, name, value):
+        pending_awaits = {*()}
+        if name not in self.__dict__:
+            klass = self.__class__.__name__.lower()
+            key = '%s:id:%s:%s' % (klass, self.id, name.lower())
+            future_0 = AppRequest('SET', key, value)
+            pending_awaits.add(future_0)
+        else:
+            self.__dict__[name] = value
+        return (pending_awaits, None)
 
-async def control_flow_dep_comparator():
-    """Check that dependent results used inside a comparison"""
-    future_0 = asyncio.ensure_future(get('key'))
-    result = None
-    x = await future_0
-    if x:
-        placeholder_code()
-    else:
-        future_1 = asyncio.ensure_future(get('key_2'))
-        result = await future_1
-        x = await future_0
-        return result
-    result = await future_1
-    return result
+    def __getattr__(self, name):
+        pending_awaits = {*()}
+        if name not in self.__dict__:
+            klass = self.__class__.__name__.lower()
+            future_0 = AppRequest('GET', '%s:id:%s:%s' % (klass, self.id, name.lower()))
+            pending_awaits.add(future_0)
+            v = AppResponse(future_0)
+            pending_awaits.remove(future_0)
+            if v:
+                return (pending_awaits, v)
+            raise AttributeError("%s doesn't exist" % name)
+        else:
+            self.__dict__[name] = value
+        return (pending_awaits, None)
 
-async def control_flow_dep_inside():
-    """Check that dependent results used inside a control flow are awaited"""
-    future_0 = asyncio.ensure_future(get('key'))
-    if temp:
-        x = await future_0
-        future_1 = asyncio.ensure_future(get(x))
-        result = await future_1
-    else:
-        future_2 = asyncio.ensure_future(get('key_2'))
-        await future_2
-    if result:
-        x = await future_0
-        return result
-    x = await future_0
-    return ' '
+class User(Model):
 
-async def control_flow_transform_inside():
-    """Check that invocations produced inside a control flow are awaited inside the control flow"""
-    temp = placeholder_code()
-    if temp:
-        future_0 = asyncio.ensure_future(get('key'))
-        placeholder_code()
-        placeholder_code()
-        x = await future_0
-    else:
-        future_1 = asyncio.ensure_future(get('key'))
-        placeholder_code()
-        placeholder_code()
-        x = await future_1
-    return result
+    @staticmethod
+    def find_by_username(username):
+        pending_awaits = {*()}
+        future_0 = AppRequest('GET', 'user:username:%s' % username)
+        pending_awaits.add(future_0)
+        _id = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        if _id is not None:
+            return (pending_awaits, User(int(_id)))
+        else:
+            return (pending_awaits, None)
+        return (pending_awaits, None)
 
-async def control_flows_dep():
-    """Check control flow dependency with for, while, if statements"""
-    future_0 = asyncio.ensure_future(get('key'))
-    future_1 = asyncio.ensure_future(get('key'))
-    future_2 = asyncio.ensure_future(get('key'))
-    y = await future_0
-    if y:
-        placeholder_code()
-    placeholder_code()
-    x = await future_1
-    while x:
-        placeholder_code()
-    z = await future_2
-    for element in z:
-        placeholder_code()
-    return True
+    @staticmethod
+    def find_by_id(_id):
+        pending_awaits = {*()}
+        future_0 = AppRequest('PANIC', 'user:id:%s:username' % _id)
+        pending_awaits.add(future_0)
+        async_cond_0 = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        if async_cond_0:
+            return (pending_awaits, User(int(_id)))
+        else:
+            return (pending_awaits, None)
+        return (pending_awaits, None)
 
-async def control_flows_dep_in_control():
-    """Check control flow dependency with dependency inside the control statement"""
-    future_0 = asyncio.ensure_future(get('key'))
-    future_1 = asyncio.ensure_future(get('key'))
-    placeholder_code()
-    x = await future_0
-    while True:
-        placeholder_code(x)
-    z = await future_1
-    for element in list:
-        placeholder_code(z)
-    return True
+    @staticmethod
+    def create(username, password):
+        pending_awaits = {*()}
+        future_0 = AppRequest('PANIC', 'user:uid')
+        pending_awaits.add(future_0)
+        future_1 = AppRequest('GET', 'user:username:%s' % username)
+        pending_awaits.add(future_1)
+        async_cond_0 = AppResponse(future_1)
+        pending_awaits.remove(future_1)
+        if not async_cond_0:
+            future_2 = AppRequest('SET', 'user:id:%s:username' % user_id, username)
+            pending_awaits.add(future_2)
+            future_3 = AppRequest('SET', 'user:username:%s' % username, user_id)
+            pending_awaits.add(future_3)
+            salt = settings.SALT
+            future_4 = AppRequest('SET', 'user:id:%s:password' % user_id, salt + password)
+            pending_awaits.add(future_4)
+            future_5 = AppRequest('PANIC', 'users', user_id)
+            pending_awaits.add(future_5)
+            user_id = AppResponse(future_0)
+            pending_awaits.remove(future_0)
+            return (pending_awaits, User(user_id))
+        return (pending_awaits, None)
 
-async def control_flows_invocation():
-    """Check control flow dependency with dependency inside the control statement"""
-    placeholder_code()
-    x = placeholder_code()
-    if placeholder_code():
-        x = new_code()
-    future_0 = asyncio.ensure_future(get(x))
-    result = await future_0
-    return result
+    def posts(self, page=1):
+        pending_awaits = {*()}
+        _from, _to = ((page - 1) * 10, page * 10)
+        future_0 = AppRequest('PANIC', 'user:id:%s:posts' % self.id, _from, _to)
+        pending_awaits.add(future_0)
+        posts = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        if posts:
+            posts = AppResponse(future_0)
+            pending_awaits.remove(future_0)
+            return (pending_awaits, [Post(int(post_id)) for post_id in posts])
+        return (pending_awaits, [])
 
-async def control_flow_externalizing_order():
-    """Check that invocations produced inside a control flow are awaited inside the control flow"""
-    temp = placeholder_code()
-    if temp:
-        future_0 = asyncio.ensure_future(get('key'))
-        placeholder_code()
-        x = await future_0
-        send_user_message()
-        future_1 = asyncio.ensure_future(get('key'))
-        placeholder_code()
-        z = await future_1
-    else:
-        future_2 = asyncio.ensure_future(get('key'))
-        placeholder_code()
-        placeholder_code()
-        x = await future_2
-    return result
+    def timeline(self, page=1):
+        pending_awaits = {*()}
+        _from, _to = ((page - 1) * 10, page * 10)
+        future_0 = AppRequest('PANIC', 'user:id:%s:timeline' % self.id, _from, _to)
+        pending_awaits.add(future_0)
+        timeline = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        if timeline:
+            timeline = AppResponse(future_0)
+            pending_awaits.remove(future_0)
+            return (pending_awaits, [Post(int(post_id)) for post_id in timeline])
+        return (pending_awaits, [])
 
-async def invocation_order_with_deps():
-    """Check that when two operations are awaited and second is used as dependency, 
-we pop out only the dependency and push the response (does not have to be
-in order)"""
-    future_0 = asyncio.ensure_future(get('key'))
-    future_1 = asyncio.ensure_future(get('key'))
-    x = await future_1
-    placeholder_code(x)
-    y = await future_0
-    return True
+    def mentions(self, page=1):
+        pending_awaits = {*()}
+        _from, _to = ((page - 1) * 10, page * 10)
+        future_0 = AppRequest('PANIC', 'user:id:%s:mentions' % self.id, _from, _to)
+        pending_awaits.add(future_0)
+        mentions = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        if mentions:
+            mentions = AppResponse(future_0)
+            pending_awaits.remove(future_0)
+            return (pending_awaits, [Post(int(post_id)) for post_id in mentions])
+        return (pending_awaits, [])
 
-async def invocation_order_inside_tests():
-    """Check other types of tests(deps) when placing between external invocations"""
-    send_user_message()
-    future_0 = asyncio.ensure_future(get('key'))
-    if placeholder_code():
-        placeholder_code()
-    if res:
-        placeholder_code()
-    y = await future_0
-    send_user_message()
-    placeholder_code(x)
-    send_user_message()
-    future_1 = asyncio.ensure_future(get('key'))
-    result = None
-    x = await future_1
-    if x:
-        placeholder_code()
-    else:
-        future_2 = asyncio.ensure_future(get('key_2'))
-        result = await future_2
-        x = await future_1
-        return result
-    send_user_message()
-    return True
+    def add_post(self, post):
+        pending_awaits = {*()}
+        future_0 = AppRequest('PANIC', 'user:id:%s:posts' % self.id, post.id)
+        pending_awaits.add(future_0)
+        future_1 = AppRequest('PANIC', 'user:id:%s:timeline' % self.id, post.id)
+        pending_awaits.add(future_1)
+        future_2 = AppRequest('PANIC', 'posts:id', post.id)
+        pending_awaits.add(future_2)
+        return (pending_awaits, None)
 
-async def function_def_without_result():
-    future_0 = asyncio.ensure_future(get('key'))
-    placeholder_code()
-    placeholder_code()
-    placeholder_code()
-    await future_0
-    return True
+    def add_timeline_post(self, post):
+        pending_awaits = {*()}
+        future_0 = AppRequest('PANIC', 'user:id:%s:timeline' % self.id, post.id)
+        pending_awaits.add(future_0)
+        return (pending_awaits, None)
 
-async def function_as_if():
-    future_0 = asyncio.ensure_future(get('key'))
-    async_cond_0 = await future_0
-    if async_cond_0:
-        placeholder_code()
-    return True
+    def add_mention(self, post):
+        pending_awaits = {*()}
+        future_0 = AppRequest('PANIC', 'user:id:%s:mentions' % self.id, post.id)
+        pending_awaits.add(future_0)
+        return (pending_awaits, None)
 
-async def function_for():
-    future_0 = asyncio.ensure_future(get('key'))
-    async_iter_0 = await future_0
-    for element in async_iter_0:
-        placeholder_code()
-    return True
+    def follow(self, user):
+        pending_awaits = {*()}
+        if user == self:
+            return (pending_awaits, None)
+        else:
+            future_0 = AppRequest('PANIC', 'user:id:%s:followees' % self.id, user.id)
+            pending_awaits.add(future_0)
+            user.add_follower(self)
+        return (pending_awaits, None)
 
-async def function_as_while():
-    future_0 = asyncio.ensure_future(get('key'))
-    async_cond_0 = await future_0
-    while async_cond_0:
-        placeholder_code()
-    return True
+    def stop_following(self, user):
+        pending_awaits = {*()}
+        future_0 = AppRequest('PANIC', 'user:id:%s:followees' % self.id, user.id)
+        pending_awaits.add(future_0)
+        user.remove_follower(self)
+        return (pending_awaits, None)
 
-def consistency_res():
-    """
-    two results are named the same  - make sure both are awaited
-    """
-    future_0 = asyncio.ensure_future(get('key'))
-    x = await future_0
-    future_1 = asyncio.ensure_future(get('key'))
-    x = await future_1
-    return True
+    def following(self, user):
+        pending_awaits = {*()}
+        future_0 = AppRequest('PANIC', 'user:id:%s:followees' % self.id, user.id)
+        pending_awaits.add(future_0)
+        async_cond_0 = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        if async_cond_0:
+            return (pending_awaits, True)
+        return (pending_awaits, False)
 
-def consistency_res():
-    """
-    two results are named the same  - make sure both are awaited
-    """
-    future_0 = asyncio.ensure_future(get('key'))
-    x, y = await future_0
-    placeholder_code(x)
-    return True
+    @property
+    def followers(self):
+        pending_awaits = {*()}
+        future_0 = AppRequest('PANIC', 'user:id:%s:followers' % self.id)
+        pending_awaits.add(future_0)
+        followers = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        if followers:
+            followers = AppResponse(future_0)
+            pending_awaits.remove(future_0)
+            return (pending_awaits, [User(int(user_id)) for user_id in followers])
+        return (pending_awaits, [])
 
-@decorator
-def send_user_message(message):
-    print(f'User message: {message}')
+    @property
+    def followees(self):
+        pending_awaits = {*()}
+        future_0 = AppRequest('PANIC', 'user:id:%s:followees' % self.id)
+        pending_awaits.add(future_0)
+        followees = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        if followees:
+            followees = AppResponse(future_0)
+            pending_awaits.remove(future_0)
+            return (pending_awaits, [User(int(user_id)) for user_id in followees])
+        return (pending_awaits, [])
+
+    @property
+    def tweet_count(self):
+        pending_awaits = {*()}
+        return (pending_awaits, AppRequest('PANIC', 'user:id:%s:posts' % self.id) or 0)
+
+    @property
+    def followees_count(self):
+        pending_awaits = {*()}
+        return (pending_awaits, AppRequest('PANIC', 'user:id:%s:followees' % self.id) or 0)
+
+    @property
+    def followers_count(self):
+        pending_awaits = {*()}
+        return (pending_awaits, AppRequest('PANIC', 'user:id:%s:followers' % self.id) or 0)
+
+    def add_follower(self, user):
+        pending_awaits = {*()}
+        future_0 = AppRequest('PANIC', 'user:id:%s:followers' % self.id, user.id)
+        pending_awaits.add(future_0)
+        return (pending_awaits, None)
+
+    def remove_follower(self, user):
+        pending_awaits = {*()}
+        future_0 = AppRequest('PANIC', 'user:id:%s:followers' % self.id, user.id)
+        pending_awaits.add(future_0)
+        return (pending_awaits, None)
+
+class Post(Model):
+
+    @staticmethod
+    def create(user, content):
+        pending_awaits = {*()}
+        future_0 = AppRequest('PANIC', 'post:uid')
+        pending_awaits.add(future_0)
+        post_id = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        post = Post(post_id)
+        post.content = content
+        post.user_id = user.id
+        user.add_post(post)
+        future_1 = AppRequest('PANIC', 'timeline', post_id)
+        pending_awaits.add(future_1)
+        for follower in user.followers:
+            follower.add_timeline_post(post)
+        mentions = re.findall('@\\w+', content)
+        for mention in mentions:
+            u = User.find_by_username(mention[1:])
+            if u:
+                u.add_mention(post)
+        return (pending_awaits, None)
+
+    @staticmethod
+    def find_by_id(id):
+        pending_awaits = {*()}
+        future_0 = AppRequest('PANIC', 'posts:id', int(id))
+        pending_awaits.add(future_0)
+        async_cond_0 = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        if async_cond_0:
+            return (pending_awaits, Post(id))
+        return (pending_awaits, None)
+
+    @property
+    def user(self):
+        pending_awaits = {*()}
+        return (pending_awaits, User.find_by_id(r.get('post:id:%s:user_id' % self.id)))
+
+def main():
+    pass
+if __name__ == '__main__':
+    main()
+    return (pending_awaits, None)
