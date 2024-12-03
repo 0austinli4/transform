@@ -11,7 +11,7 @@ async def basic_test():
     return result
 
 async def basic_test_dep_await():
-    """Test that awaits only get pushed down until dependency"""
+    """Test that awaits only get pushed down until dependencys"""
     future_0 = asyncio.ensure_future(get('key'))
     x = await future_0
     '\n    Test that awaits only get pushed down until dependency\n    '
