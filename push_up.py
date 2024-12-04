@@ -88,7 +88,12 @@ class User(Model):
         future_0 = AppRequest('PANIC', 'user:id:%s:posts' % self.id, _from, _to)
         posts = AppResponse(future_0)
         if posts:
-            return [Post(int(post_id)) for post_id in posts]
+            future_1 = AppRequest('PANIC', 'timeline', _from, _to)
+            async_iter_0 = AppResponse(future_1)
+            return_posts = []
+            for post_id in async_iter_0:
+                return_posts.append(Post(post_id))
+            return return_posts
         return []
 
     def timeline(self, page=1):
@@ -96,7 +101,12 @@ class User(Model):
         future_0 = AppRequest('PANIC', 'user:id:%s:timeline' % self.id, _from, _to)
         timeline = AppResponse(future_0)
         if timeline:
-            return [Post(int(post_id)) for post_id in timeline]
+            future_1 = AppRequest('PANIC', 'timeline', _from, _to)
+            async_iter_0 = AppResponse(future_1)
+            return_posts = []
+            for post_id in async_iter_0:
+                return_posts.append(Post(post_id))
+            return return_posts
         return []
 
     def mentions(self, page=1):
@@ -104,7 +114,11 @@ class User(Model):
         future_0 = AppRequest('PANIC', 'user:id:%s:mentions' % self.id, _from, _to)
         mentions = AppResponse(future_0)
         if mentions:
-            return [Post(int(post_id)) for post_id in mentions]
+            future_1 = AppRequest('PANIC', 'timeline', _from, _to)
+            async_iter_0 = AppResponse(future_1)
+            for post_id in async_iter_0:
+                return_posts.append(Post(post_id))
+            return return_posts
         return []
 
     def add_post(self, post):
@@ -148,7 +162,12 @@ class User(Model):
         future_0 = AppRequest('PANIC', 'user:id:%s:followers' % self.id)
         followers = AppResponse(future_0)
         if followers:
-            return [User(int(user_id)) for user_id in followers]
+            future_1 = AppRequest('PANIC', 'timeline', _from, _to)
+            async_iter_0 = AppResponse(future_1)
+            return_posts = []
+            for user_id in async_iter_0:
+                return_posts.append(User(int(user_id)))
+            return return_posts
         return []
 
     @property
@@ -156,20 +175,28 @@ class User(Model):
         future_0 = AppRequest('PANIC', 'user:id:%s:followees' % self.id)
         followees = AppResponse(future_0)
         if followees:
-            return [User(int(user_id)) for user_id in followees]
+            future_1 = AppRequest('PANIC', 'timeline', _from, _to)
+            async_iter_0 = AppResponse(future_1)
+            return_posts = []
+            for user_id in async_iter_0:
+                return_posts.append(User(int(user_id)))
+            return return_posts
         return []
 
     @property
     def tweet_count(self):
-        return AppRequest('PANIC', 'user:id:%s:posts' % self.id) or 0
+        res = r.llen('user:id:%s:posts' % self.id) or 0
+        return res
 
     @property
     def followees_count(self):
-        return AppRequest('PANIC', 'user:id:%s:followees' % self.id) or 0
+        res = r.scard('user:id:%s:followees' % self.id) or 0
+        return res
 
     @property
     def followers_count(self):
-        return AppRequest('PANIC', 'user:id:%s:followers' % self.id) or 0
+        res = r.scard('user:id:%s:followers' % self.id) or 0
+        return res
 
     def add_follower(self, user):
         future_0 = AppRequest('PANIC', 'user:id:%s:followers' % self.id, user.id)

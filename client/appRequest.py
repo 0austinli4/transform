@@ -25,7 +25,7 @@ app_response = library.AsyncAppResponse
 app_response.argtypes = [ctypes.c_char_p]
 app_response.restype = ctypes.c_char_p
 
-def appRequest(op_type, key, value=None):
+def AppRequest(op_type, key, value=None):
     try:
         print(f"Python: Starting appRequest with op_type={op_type}, key={key}, value={value}")
         # Convert operation type and key to JSON arrays
@@ -57,7 +57,7 @@ def appRequest(op_type, key, value=None):
         raise
 
 
-def appResponse(keys):
+def AppResponse(keys):
     try:
         print(f"Python: Starting appResponse with keys={keys}")
         

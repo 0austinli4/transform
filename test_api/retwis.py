@@ -59,6 +59,7 @@ class User(Model):
   def create(username, password):
     user_id = r.incr("user:uid")
     if not r.get("user:username:%s" % username):
+
       r.set("user:id:%s:username" % user_id, username)
       r.set("user:username:%s" % username, user_id)
     
@@ -73,21 +74,29 @@ class User(Model):
     _from, _to = (page-1)*10, page*10
     posts = r.lrange("user:id:%s:posts" % self.id, _from, _to)
     if posts:
-      return [Post(int(post_id)) for post_id in posts]
+      return_posts = []
+      for post_id in r.lrange('timeline',_from,_to):
+        return_posts.append(Post(post_id))
+      return return_posts
     return []
   
   def timeline(self,page=1):
     _from, _to = (page-1)*10, page*10
     timeline= r.lrange("user:id:%s:timeline" % self.id, _from, _to)
     if timeline:
-      return [Post(int(post_id)) for post_id in timeline]
+      return_posts =[]
+      for post_id in r.lrange('timeline',_from,_to):
+        return_posts.append(Post(post_id))
+      return return_posts
     return []
 
   def mentions(self,page=1):
     _from, _to = (page-1)*10, page*10
     mentions = r.lrange("user:id:%s:mentions" % self.id, _from, _to)
     if mentions:
-      return [Post(int(post_id)) for post_id in mentions]
+      for post_id in r.lrange('timeline',_from,_to):
+        return_posts.append(Post(post_id))
+      return return_posts
     return []
 
 
@@ -122,29 +131,39 @@ class User(Model):
   def followers(self):
     followers = r.smembers("user:id:%s:followers" % self.id)
     if followers:
-      return [User(int(user_id)) for user_id in followers]
+      return_posts = []
+      for user_id in r.lrange('timeline',_from,_to):
+        return_posts.append(User(int(user_id)))
+      return return_posts
+      
     return []
   
   @property
   def followees(self):
     followees = r.smembers("user:id:%s:followees" % self.id)
     if followees:
-      return [User(int(user_id)) for user_id in followees]
+      return_posts = []
+      for user_id in r.lrange('timeline',_from,_to):
+        return_posts.append(User(int(user_id)))
+      return return_posts
     return []
   
   
   #added
   @property
   def tweet_count(self):
-    return r.llen("user:id:%s:posts" % self.id) or 0
+    res = r.llen("user:id:%s:posts" % self.id) or 0
+    return res
   
   @property
   def followees_count(self):
-    return r.scard("user:id:%s:followees" % self.id) or 0
+    res = r.scard("user:id:%s:followees" % self.id) or 0
+    return res
     
   @property
   def followers_count(self):
-    return r.scard("user:id:%s:followers" % self.id) or 0
+    res = r.scard("user:id:%s:followers" % self.id) or 0
+    return res
 
   def add_follower(self,user):
     r.sadd("user:id:%s:followers" % self.id, user.id)

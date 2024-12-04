@@ -108,9 +108,15 @@ class AwaitMover(ast.NodeTransformer):
                 )
                 final_body.append(stmt)
                 final_body.append(append_stmt)
+                # final_body.append(ast.Expr(value=ast.Constant(value="", kind=None)))
 
             elif self.is_async_function_call(stmt):
-                func_name = stmt.value.func.id
+                # Get function name handling both direct calls and attribute calls
+                if isinstance(stmt.value.func, ast.Name):
+                    func_name = stmt.value.func.id
+                else:  # ast.Attribute
+                    func_name = stmt.value.func.attr
+
                 pending_var = f"pending_awaits_{func_name}"
 
                 # Assign for pending variable
@@ -240,14 +246,19 @@ class AwaitMover(ast.NodeTransformer):
         return []
 
     def is_async_function_call(self, stmt):
+        # Needs to handle both function calls and attribute calls
         # Handle expression statements
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
             if isinstance(stmt.value.func, ast.Name):
                 return stmt.value.func.id in self.async_funcs
+            elif isinstance(stmt.value.func, ast.Attribute):
+                return stmt.value.func.attr in self.async_funcs
         # Handle assignments
         elif isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Call):
             if isinstance(stmt.value.func, ast.Name):
                 return stmt.value.func.id in self.async_funcs
+            elif isinstance(stmt.value.func, ast.Attribute):
+                return stmt.value.func.attr in self.async_funcs
         return False
 
     def is_await_call(self, node):

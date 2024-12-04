@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"sync"
 	"unsafe"
+    "github.com/yourusername/MDLin/src/state"
 )
 
 type Response struct {
