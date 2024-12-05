@@ -43,6 +43,15 @@ class AsyncTransformer(ast.NodeTransformer):
                 type_comment=node.type_comment
             )
         return self.generic_visit(node)
+    
+    def visit_Return(self, node):
+        if node.value:
+            transformed_value, assignments = self.transform_return_value(node.value)
+            if assignments:
+                # Add the assignments before the return
+                return assignments + [ast.Return(value=transformed_value)]
+            return node
+        return node
 
     def visit_Call(self, node):
         func_name = self.get_func_name(node)
@@ -184,6 +193,7 @@ class AsyncTransformer(ast.NodeTransformer):
             
             return ast.Name(id=iter_var, ctx=ast.Load()), [iter_assign, app_response_expr]
         return node, []
+
     def transform_condition(self, node):
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
             transformed_operand, assignments = self.transform_condition(node.operand)
@@ -231,30 +241,17 @@ class AsyncTransformer(ast.NodeTransformer):
     def transform_async_call(self, node):
         # Get the function name
         func_name = self.get_func_name(node)
-        if func_name and func_name.startswith('r.'):
-            # Extract the Redis operation (after 'r.')
-            redis_op = func_name.split('.')[-1].upper()
-            if redis_op not in ['GET', 'SET']:
-                redis_op = 'PANIC'
-            
-            # Create AppRequest call
-            return ast.Call(
-                func=ast.Name(id='AppRequest', ctx=ast.Load()),
-                args=[
-                    ast.Constant(value=redis_op),
-                    *node.args  # Pass through the original arguments
-                ],
-                keywords=[]
-            )
         
-        # Default to ensure_future for non-Redis calls
+        # Extract the operation name (last part of the function call)
+        op = func_name.split('.')[-1].upper() if func_name else ''
+        
+        # Create AppRequest call
         return ast.Call(
-            func=ast.Attribute(
-                value=ast.Name(id='asyncio', ctx=ast.Load()),
-                attr='ensure_future',
-                ctx=ast.Load()
-            ),
-            args=[node],
+            func=ast.Name(id='AppRequest', ctx=ast.Load()),
+            args=[
+                ast.Constant(value=op),
+                *node.args  # Pass through the original arguments
+            ],
             keywords=[]
         )
 
@@ -262,6 +259,42 @@ class AsyncTransformer(ast.NodeTransformer):
         ast.copy_location(new_node, old_node)
         ast.fix_missing_locations(new_node)
         return new_node
+
+    def transform_return_value(self, node):
+        # If it's a function call that we need to transform
+        if isinstance(node, ast.Call) and self.is_async_call(node):
+            future_var = f"future_{self.future_counter}"
+            return_var = f"async_return_{self.temp_var_counter}"
+            self.future_counter += 1
+            self.temp_var_counter += 1
+            
+            future_assign = self.copy_location(ast.Assign(
+                targets=[ast.Name(id=future_var, ctx=ast.Store())],
+                value=self.transform_async_call(node)
+            ), node)
+            
+            app_response_assign = self.copy_location(ast.Assign(
+                targets=[ast.Name(id=return_var, ctx=ast.Store())],
+                value=ast.Call(
+                    func=ast.Name(id='AppResponse', ctx=ast.Load()),
+                    args=[ast.Name(id=future_var, ctx=ast.Load())],
+                    keywords=[]
+                )
+            ), node)
+            
+            return ast.Name(id=return_var, ctx=ast.Load()), [future_assign, app_response_assign]
+        elif isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+            left_value = node.values[0]  # First value in or operation
+            if isinstance(left_value, ast.Call) and self.is_async_call(left_value):
+                transformed_value, assignments = self.transform_return_value(left_value)
+                if assignments:
+                    new_node = ast.BoolOp(
+                        op=node.op,
+                        values=[transformed_value] + node.values[1:]
+                    )
+                    return new_node, assignments
+        return node, []
+
 
 def collect_top_level_functions(source_code):
     tree = ast.parse(source_code)

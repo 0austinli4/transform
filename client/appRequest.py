@@ -15,22 +15,28 @@ try:
 except OSError as e:
     raise OSError(f"Failed to load library at {lib_path}. Error: {e}")
 
-# REQUEST
+# Set up function signatures
 app_request = library.AsyncAppRequest
 app_request.argtypes = [ctypes.c_char_p, ctypes.c_char_p]
 app_request.restype = ctypes.c_char_p
 
-# RESPONSE
 app_response = library.AsyncAppResponse
 app_response.argtypes = [ctypes.c_char_p]
 app_response.restype = ctypes.c_char_p
 
-def AppRequest(op_type, key, value=None):
+def AppRequest(op_type, key, oldValue=None, newValue=None):
     try:
-        print(f"Python: Starting appRequest with op_type={op_type}, key={key}, value={value}")
-        # Convert operation type and key to JSON arrays
+        print(f"Python: Starting appRequest with op_type={op_type}, key={key}")
+        
+        # Convert operation type to JSON
         op_types_json = json.dumps(op_type).encode('utf-8')
-        keys_json = json.dumps(int(key)).encode('utf-8')  # Ensure key is an integer
+        
+        # Convert key to string, strip any non-numeric characters, then encode
+        # This handles cases like "post:123" -> "123"
+        numeric_key = ''.join(c for c in str(key) if c.isdigit())
+        if not numeric_key:
+            raise ValueError(f"Key '{key}' contains no numeric value")
+        keys_json = numeric_key.encode('utf-8')
         
         print(f"Python: Encoded JSON - op_types={op_types_json}, keys={keys_json}")
         
@@ -39,65 +45,38 @@ def AppRequest(op_type, key, value=None):
         print(f"Python: Received result pointer: {result_ptr}")
         
         if not result_ptr:
-            raise Exception("Null pointer returned from Go function")
-
-        # Convert result to Python string and parse JSON
+            return None
+            
+        # Convert result from bytes to string
         result_str = ctypes.string_at(result_ptr).decode('utf-8')
         print(f"Python: Decoded result string: {result_str}")
         
+        # Parse JSON result
         result = json.loads(result_str)
-        print(f"Python: Parsed JSON result: {result}")
-
-        if not result['success']:
-            raise Exception("Golang code did not succeed execution")
+        print(f"Python: Parsed result: {result}")
         
-        return result['result']
+        return result
     except Exception as e:
         print(f"Python: Error in appRequest: {str(e)}")
         raise
 
-
-def AppResponse(keys):
+def AppResponse(key):
     try:
-        print(f"Python: Starting appResponse with keys={keys}")
-        
-        # Convert keys to JSON
-        key_json = json.dumps(keys).encode('utf-8')
-        print(f"Python: Encoded JSON - keys={key_json}")
+        # Convert key to JSON string
+        key_json = json.dumps(key).encode('utf-8')
         
         # Call Go function
         result_ptr = app_response(key_json)
-        print(f"Python: Received result pointer: {result_ptr}")
-            
         if not result_ptr:
-            raise Exception("Null pointer returned from Go function")
+            return None
             
-        # Convert result to Python string and parse JSON
+        # Convert result from bytes to string
         result_str = ctypes.string_at(result_ptr).decode('utf-8')
-        print(f"Python: Decoded result string: {result_str}")
         
+        # Parse JSON result
         result = json.loads(result_str)
-        print(f"Python: Parsed JSON result: {result}")
-
-        if not result['success']:
-            raise Exception(f"Golang code failed: {result['result']}")
-
-        # The result field could be different types depending on the operation
-        # For example, it might be an int64 for some operations
-        # or a string for error messages
-        return result['result']  # This could be any JSON-serializable type
+        
+        return result
     except Exception as e:
-        print(f"Python: Error in appResponse: {str(e)}")
+        print(f"Error in appResponse: {str(e)}")
         raise
-
-
-# Example usage
-if __name__ == "__main__":
-    key = 123
-    value = 456
-    # Example GET request
-    result = appRequest("GET", key)
-    final_answer = appResponse(result)
-    print(f"Python: GET result, Result: {result}")
-    print(f"Python: Final answer, Result: {final_answer}")
-    

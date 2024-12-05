@@ -2,7 +2,6 @@ import asyncio
 import redis
 import re
 import settings
-from client.appRequest import AppRequest, AppResponse
 r = settings.r
 
 class Timeline:
@@ -12,7 +11,7 @@ class Timeline:
         _from = (page - 1) * 10
         _to = page * 10
         posts = []
-        future_0 = AppRequest('PANIC', 'timeline', _from, _to)
+        future_0 = AppRequest('LRANGE', 'timeline', _from, _to)
         pending_awaits.add(future_0)
         async_iter_0 = AppResponse(future_0)
         pending_awaits.remove(future_0)
@@ -76,7 +75,7 @@ class User(Model):
     @staticmethod
     def find_by_id(_id):
         pending_awaits = {*()}
-        future_0 = AppRequest('PANIC', 'user:id:%s:username' % _id)
+        future_0 = AppRequest('EXISTS', 'user:id:%s:username' % _id)
         pending_awaits.add(future_0)
         async_cond_0 = AppResponse(future_0)
         pending_awaits.remove(future_0)
@@ -89,7 +88,7 @@ class User(Model):
     @staticmethod
     def create(username, password):
         pending_awaits = {*()}
-        future_0 = AppRequest('PANIC', 'user:uid')
+        future_0 = AppRequest('INCR', 'user:uid')
         pending_awaits.add(future_0)
         future_1 = AppRequest('GET', 'user:username:%s' % username)
         pending_awaits.add(future_1)
@@ -103,7 +102,7 @@ class User(Model):
             salt = settings.SALT
             future_4 = AppRequest('SET', 'user:id:%s:password' % user_id, salt + password)
             pending_awaits.add(future_4)
-            future_5 = AppRequest('PANIC', 'users', user_id)
+            future_5 = AppRequest('LPUSH', 'users', user_id)
             pending_awaits.add(future_5)
             user_id = AppResponse(future_0)
             pending_awaits.remove(future_0)
@@ -113,12 +112,12 @@ class User(Model):
     def posts(self, page=1):
         pending_awaits = {*()}
         _from, _to = ((page - 1) * 10, page * 10)
-        future_0 = AppRequest('PANIC', 'user:id:%s:posts' % self.id, _from, _to)
+        future_0 = AppRequest('LRANGE', 'user:id:%s:posts' % self.id, _from, _to)
         pending_awaits.add(future_0)
         posts = AppResponse(future_0)
         pending_awaits.remove(future_0)
         if posts:
-            future_1 = AppRequest('PANIC', 'timeline', _from, _to)
+            future_1 = AppRequest('LRANGE', 'timeline', _from, _to)
             pending_awaits.add(future_1)
             return_posts = []
             async_iter_0 = AppResponse(future_1)
@@ -131,12 +130,12 @@ class User(Model):
     def timeline(self, page=1):
         pending_awaits = {*()}
         _from, _to = ((page - 1) * 10, page * 10)
-        future_0 = AppRequest('PANIC', 'user:id:%s:timeline' % self.id, _from, _to)
+        future_0 = AppRequest('LRANGE', 'user:id:%s:timeline' % self.id, _from, _to)
         pending_awaits.add(future_0)
         timeline = AppResponse(future_0)
         pending_awaits.remove(future_0)
         if timeline:
-            future_1 = AppRequest('PANIC', 'timeline', _from, _to)
+            future_1 = AppRequest('LRANGE', 'timeline', _from, _to)
             pending_awaits.add(future_1)
             return_posts = []
             async_iter_0 = AppResponse(future_1)
@@ -149,12 +148,12 @@ class User(Model):
     def mentions(self, page=1):
         pending_awaits = {*()}
         _from, _to = ((page - 1) * 10, page * 10)
-        future_0 = AppRequest('PANIC', 'user:id:%s:mentions' % self.id, _from, _to)
+        future_0 = AppRequest('LRANGE', 'user:id:%s:mentions' % self.id, _from, _to)
         pending_awaits.add(future_0)
         mentions = AppResponse(future_0)
         pending_awaits.remove(future_0)
         if mentions:
-            future_1 = AppRequest('PANIC', 'timeline', _from, _to)
+            future_1 = AppRequest('LRANGE', 'timeline', _from, _to)
             pending_awaits.add(future_1)
             async_iter_0 = AppResponse(future_1)
             pending_awaits.remove(future_1)
@@ -165,23 +164,23 @@ class User(Model):
 
     def add_post(self, post):
         pending_awaits = {*()}
-        future_0 = AppRequest('PANIC', 'user:id:%s:posts' % self.id, post.id)
+        future_0 = AppRequest('LPUSH', 'user:id:%s:posts' % self.id, post.id)
         pending_awaits.add(future_0)
-        future_1 = AppRequest('PANIC', 'user:id:%s:timeline' % self.id, post.id)
+        future_1 = AppRequest('LPUSH', 'user:id:%s:timeline' % self.id, post.id)
         pending_awaits.add(future_1)
-        future_2 = AppRequest('PANIC', 'posts:id', post.id)
+        future_2 = AppRequest('SADD', 'posts:id', post.id)
         pending_awaits.add(future_2)
         return (pending_awaits, None)
 
     def add_timeline_post(self, post):
         pending_awaits = {*()}
-        future_0 = AppRequest('PANIC', 'user:id:%s:timeline' % self.id, post.id)
+        future_0 = AppRequest('LPUSH', 'user:id:%s:timeline' % self.id, post.id)
         pending_awaits.add(future_0)
         return (pending_awaits, None)
 
     def add_mention(self, post):
         pending_awaits = {*()}
-        future_0 = AppRequest('PANIC', 'user:id:%s:mentions' % self.id, post.id)
+        future_0 = AppRequest('LPUSH', 'user:id:%s:mentions' % self.id, post.id)
         pending_awaits.add(future_0)
         return (pending_awaits, None)
 
@@ -190,7 +189,7 @@ class User(Model):
         if user == self:
             return (pending_awaits, None)
         else:
-            future_0 = AppRequest('PANIC', 'user:id:%s:followees' % self.id, user.id)
+            future_0 = AppRequest('SADD', 'user:id:%s:followees' % self.id, user.id)
             pending_awaits.add(future_0)
             pending_awaits_add_follower, _ = user.add_follower(self)
             pending_awaits.update(pending_awaits_add_follower)
@@ -198,7 +197,7 @@ class User(Model):
 
     def stop_following(self, user):
         pending_awaits = {*()}
-        future_0 = AppRequest('PANIC', 'user:id:%s:followees' % self.id, user.id)
+        future_0 = AppRequest('SREM', 'user:id:%s:followees' % self.id, user.id)
         pending_awaits.add(future_0)
         pending_awaits_remove_follower, _ = user.remove_follower(self)
         pending_awaits.update(pending_awaits_remove_follower)
@@ -206,7 +205,7 @@ class User(Model):
 
     def following(self, user):
         pending_awaits = {*()}
-        future_0 = AppRequest('PANIC', 'user:id:%s:followees' % self.id, user.id)
+        future_0 = AppRequest('SISMEMBER', 'user:id:%s:followees' % self.id, user.id)
         pending_awaits.add(future_0)
         async_cond_0 = AppResponse(future_0)
         pending_awaits.remove(future_0)
@@ -217,12 +216,12 @@ class User(Model):
     @property
     def followers(self):
         pending_awaits = {*()}
-        future_0 = AppRequest('PANIC', 'user:id:%s:followers' % self.id)
+        future_0 = AppRequest('SMEMBERS', 'user:id:%s:followers' % self.id)
         pending_awaits.add(future_0)
         followers = AppResponse(future_0)
         pending_awaits.remove(future_0)
         if followers:
-            future_1 = AppRequest('PANIC', 'timeline', _from, _to)
+            future_1 = AppRequest('LRANGE', 'timeline', _from, _to)
             pending_awaits.add(future_1)
             return_posts = []
             async_iter_0 = AppResponse(future_1)
@@ -235,12 +234,12 @@ class User(Model):
     @property
     def followees(self):
         pending_awaits = {*()}
-        future_0 = AppRequest('PANIC', 'user:id:%s:followees' % self.id)
+        future_0 = AppRequest('SMEMBERS', 'user:id:%s:followees' % self.id)
         pending_awaits.add(future_0)
         followees = AppResponse(future_0)
         pending_awaits.remove(future_0)
         if followees:
-            future_1 = AppRequest('PANIC', 'timeline', _from, _to)
+            future_1 = AppRequest('LRANGE', 'timeline', _from, _to)
             pending_awaits.add(future_1)
             return_posts = []
             async_iter_0 = AppResponse(future_1)
@@ -253,30 +252,39 @@ class User(Model):
     @property
     def tweet_count(self):
         pending_awaits = {*()}
-        res = r.llen('user:id:%s:posts' % self.id) or 0
-        return (pending_awaits, res)
+        future_0 = AppRequest('LLEN', 'user:id:%s:posts' % self.id)
+        pending_awaits.add(future_0)
+        async_return_0 = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        return (pending_awaits, async_return_0 or 0)
 
     @property
     def followees_count(self):
         pending_awaits = {*()}
-        res = r.scard('user:id:%s:followees' % self.id) or 0
-        return (pending_awaits, res)
+        future_0 = AppRequest('SCARD', 'user:id:%s:followees' % self.id)
+        pending_awaits.add(future_0)
+        async_return_0 = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        return (pending_awaits, async_return_0 or 0)
 
     @property
     def followers_count(self):
         pending_awaits = {*()}
-        res = r.scard('user:id:%s:followers' % self.id) or 0
-        return (pending_awaits, res)
+        future_0 = AppRequest('SCARD', 'user:id:%s:followers' % self.id)
+        pending_awaits.add(future_0)
+        async_return_0 = AppResponse(future_0)
+        pending_awaits.remove(future_0)
+        return (pending_awaits, async_return_0 or 0)
 
     def add_follower(self, user):
         pending_awaits = {*()}
-        future_0 = AppRequest('PANIC', 'user:id:%s:followers' % self.id, user.id)
+        future_0 = AppRequest('SADD', 'user:id:%s:followers' % self.id, user.id)
         pending_awaits.add(future_0)
         return (pending_awaits, None)
 
     def remove_follower(self, user):
         pending_awaits = {*()}
-        future_0 = AppRequest('PANIC', 'user:id:%s:followers' % self.id, user.id)
+        future_0 = AppRequest('SREM', 'user:id:%s:followers' % self.id, user.id)
         pending_awaits.add(future_0)
         return (pending_awaits, None)
 
@@ -285,7 +293,7 @@ class Post(Model):
     @staticmethod
     def create(user, content):
         pending_awaits = {*()}
-        future_0 = AppRequest('PANIC', 'post:uid')
+        future_0 = AppRequest('INCR', 'post:uid')
         pending_awaits.add(future_0)
         post_id = AppResponse(future_0)
         pending_awaits.remove(future_0)
@@ -294,7 +302,7 @@ class Post(Model):
         post.user_id = user.id
         pending_awaits_add_post, _ = user.add_post(post)
         pending_awaits.update(pending_awaits_add_post)
-        future_1 = AppRequest('PANIC', 'timeline', post_id)
+        future_1 = AppRequest('LPUSH', 'timeline', post_id)
         pending_awaits.add(future_1)
         for follower in user.followers:
             follower.add_timeline_post(post)
@@ -309,7 +317,7 @@ class Post(Model):
     @staticmethod
     def find_by_id(id):
         pending_awaits = {*()}
-        future_0 = AppRequest('PANIC', 'posts:id', int(id))
+        future_0 = AppRequest('SISMEMBER', 'posts:id', int(id))
         pending_awaits.add(future_0)
         async_cond_0 = AppResponse(future_0)
         pending_awaits.remove(future_0)

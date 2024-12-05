@@ -152,18 +152,15 @@ class User(Model):
   #added
   @property
   def tweet_count(self):
-    res = r.llen("user:id:%s:posts" % self.id) or 0
-    return res
+    return r.llen("user:id:%s:posts" % self.id) or 0
   
   @property
   def followees_count(self):
-    res = r.scard("user:id:%s:followees" % self.id) or 0
-    return res
+    return r.scard("user:id:%s:followees" % self.id) or 0
     
   @property
   def followers_count(self):
-    res = r.scard("user:id:%s:followers" % self.id) or 0
-    return res
+    return r.scard("user:id:%s:followers" % self.id) or 0
 
   def add_follower(self,user):
     r.sadd("user:id:%s:followers" % self.id, user.id)
