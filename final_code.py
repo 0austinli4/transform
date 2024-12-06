@@ -1,337 +1,106 @@
 import asyncio
-import redis
-import re
-import settings
-r = settings.r
+import json
+import math
+import random
+import bcrypt
+from chat import demo_data
+from chat.config import get_config
+SERVER_ID = random.uniform(0, 322321)
+redis_client = get_config().redis_client
 
-class Timeline:
+def make_username_key(username):
+    return f'username:{username}'
 
-    def page(self, page):
-        pending_awaits = {*()}
-        _from = (page - 1) * 10
-        _to = page * 10
-        posts = []
-        future_0 = AppRequest('LRANGE', 'timeline', _from, _to)
-        pending_awaits.add(future_0)
-        async_iter_0 = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        for post_id in async_iter_0:
-            posts.append(Post(post_id))
-        return (pending_awaits, posts)
+def create_user(username, password):
+    pending_awaits = {*()}
+    username_key = make_username_key(username)
+    hashed_password = bcrypt.hashpw(str(password).encode('utf-8'), bcrypt.gensalt(10))
+    future_0 = AppRequest('INCR', 'total_users')
+    pending_awaits.add(future_0)
+    next_id = AppResponse(future_0)
+    pending_awaits.remove(future_0)
+    user_key = f'user:{next_id}'
+    future_1 = AppRequest('SET', username_key, user_key)
+    pending_awaits.add(future_1)
+    future_2 = AppRequest('HMSET', user_key, {'username': username, 'password': hashed_password})
+    pending_awaits.add(future_2)
+    future_3 = AppRequest('SADD', f'user:{next_id}:rooms', '0')
+    pending_awaits.add(future_3)
+    next_id = AppResponse(future_0)
+    pending_awaits.remove(future_0)
+    return (pending_awaits, {'id': next_id, 'username': username})
 
-class Model(object):
-
-    def __init__(self, id):
-        self.__dict__['id'] = id
-
-    def __eq__(self, other):
-        return self.id == other.id
-
-    def __setattr__(self, name, value):
-        pending_awaits = {*()}
-        if name not in self.__dict__:
-            klass = self.__class__.__name__.lower()
-            key = '%s:id:%s:%s' % (klass, self.id, name.lower())
-            future_0 = AppRequest('SET', key, value)
-            pending_awaits.add(future_0)
-        else:
-            self.__dict__[name] = value
-        return (pending_awaits, None)
-
-    def __getattr__(self, name):
-        pending_awaits = {*()}
-        if name not in self.__dict__:
-            klass = self.__class__.__name__.lower()
-            future_0 = AppRequest('GET', '%s:id:%s:%s' % (klass, self.id, name.lower()))
-            pending_awaits.add(future_0)
-            v = AppResponse(future_0)
-            pending_awaits.remove(future_0)
-            if v:
-                v = AppResponse(future_0)
-                pending_awaits.remove(future_0)
-                return (pending_awaits, v)
-            raise AttributeError("%s doesn't exist" % name)
-        else:
-            self.__dict__[name] = value
-        return (pending_awaits, None)
-
-class User(Model):
-
-    @staticmethod
-    def find_by_username(username):
-        pending_awaits = {*()}
-        future_0 = AppRequest('GET', 'user:username:%s' % username)
-        pending_awaits.add(future_0)
-        _id = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        if _id is not None:
-            _id = AppResponse(future_0)
-            pending_awaits.remove(future_0)
-            return (pending_awaits, User(int(_id)))
-        else:
-            return (pending_awaits, None)
-        return (pending_awaits, None)
-
-    @staticmethod
-    def find_by_id(_id):
-        pending_awaits = {*()}
-        future_0 = AppRequest('EXISTS', 'user:id:%s:username' % _id)
-        pending_awaits.add(future_0)
-        async_cond_0 = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        if async_cond_0:
-            return (pending_awaits, User(int(_id)))
-        else:
-            return (pending_awaits, None)
-        return (pending_awaits, None)
-
-    @staticmethod
-    def create(username, password):
-        pending_awaits = {*()}
-        future_0 = AppRequest('INCR', 'user:uid')
-        pending_awaits.add(future_0)
-        future_1 = AppRequest('GET', 'user:username:%s' % username)
+def get_messages(room_id=0, offset=0, size=50):
+    pending_awaits = {*()}
+    'Check if room with id exists; fetch messages limited by size'
+    room_key = f'room:{room_id}'
+    future_0 = AppRequest('EXISTS', room_key)
+    pending_awaits.add(future_0)
+    room_exists = AppResponse(future_0)
+    pending_awaits.remove(future_0)
+    if not room_exists:
+        return (pending_awaits, [])
+    else:
+        future_1 = AppRequest('ZREVRANGE', room_key, offset, offset + size)
         pending_awaits.add(future_1)
-        async_cond_0 = AppResponse(future_1)
+        values = AppResponse(future_1)
         pending_awaits.remove(future_1)
-        if not async_cond_0:
-            future_2 = AppRequest('SET', 'user:id:%s:username' % user_id, username)
-            pending_awaits.add(future_2)
-            future_3 = AppRequest('SET', 'user:username:%s' % username, user_id)
-            pending_awaits.add(future_3)
-            salt = settings.SALT
-            future_4 = AppRequest('SET', 'user:id:%s:password' % user_id, salt + password)
-            pending_awaits.add(future_4)
-            future_5 = AppRequest('LPUSH', 'users', user_id)
-            pending_awaits.add(future_5)
-            user_id = AppResponse(future_0)
-            pending_awaits.remove(future_0)
-            return (pending_awaits, User(user_id))
-        return (pending_awaits, None)
+        return (pending_awaits, list(map(lambda x: json.loads(x.decode('utf-8')), values)))
+    return (pending_awaits, None)
 
-    def posts(self, page=1):
-        pending_awaits = {*()}
-        _from, _to = ((page - 1) * 10, page * 10)
-        future_0 = AppRequest('LRANGE', 'user:id:%s:posts' % self.id, _from, _to)
-        pending_awaits.add(future_0)
-        posts = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        if posts:
-            future_1 = AppRequest('LRANGE', 'timeline', _from, _to)
-            pending_awaits.add(future_1)
-            return_posts = []
-            async_iter_0 = AppResponse(future_1)
-            pending_awaits.remove(future_1)
-            for post_id in async_iter_0:
-                return_posts.append(Post(post_id))
-            return (pending_awaits, return_posts)
-        return (pending_awaits, [])
+def hmget(key, key2):
+    pending_awaits = {*()}
+    future_0 = AppRequest('HMGET', key, key2)
+    pending_awaits.add(future_0)
+    result = AppResponse(future_0)
+    pending_awaits.remove(future_0)
+    return (pending_awaits, list(map(lambda x: x.decode('utf-8'), result)))
 
-    def timeline(self, page=1):
-        pending_awaits = {*()}
-        _from, _to = ((page - 1) * 10, page * 10)
-        future_0 = AppRequest('LRANGE', 'user:id:%s:timeline' % self.id, _from, _to)
-        pending_awaits.add(future_0)
-        timeline = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        if timeline:
-            future_1 = AppRequest('LRANGE', 'timeline', _from, _to)
-            pending_awaits.add(future_1)
-            return_posts = []
-            async_iter_0 = AppResponse(future_1)
-            pending_awaits.remove(future_1)
-            for post_id in async_iter_0:
-                return_posts.append(Post(post_id))
-            return (pending_awaits, return_posts)
-        return (pending_awaits, [])
+def get_private_room_id(user1, user2):
+    if math.isnan(user1) or math.isnan(user2) or user1 == user2:
+        return None
+    min_user_id = user2 if user1 > user2 else user1
+    max_user_id = user1 if user1 > user2 else user2
+    return f'{min_user_id}:{max_user_id}'
 
-    def mentions(self, page=1):
-        pending_awaits = {*()}
-        _from, _to = ((page - 1) * 10, page * 10)
-        future_0 = AppRequest('LRANGE', 'user:id:%s:mentions' % self.id, _from, _to)
-        pending_awaits.add(future_0)
-        mentions = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        if mentions:
-            future_1 = AppRequest('LRANGE', 'timeline', _from, _to)
-            pending_awaits.add(future_1)
-            async_iter_0 = AppResponse(future_1)
-            pending_awaits.remove(future_1)
-            for post_id in async_iter_0:
-                return_posts.append(Post(post_id))
-            return (pending_awaits, return_posts)
-        return (pending_awaits, [])
+def create_private_room(user1, user2):
+    pending_awaits = {*()}
+    room_id = get_private_room_id(user1, user2)
+    if not room_id:
+        return (pending_awaits, (None, True))
+    future_0 = AppRequest('SADD', f'user:{user1}:rooms', room_id)
+    pending_awaits.add(future_0)
+    future_1 = AppRequest('SADD', f'user:{user2}:rooms', room_id)
+    pending_awaits.add(future_1)
+    return (pending_awaits, ({'id': room_id, 'names': [hmget(f'user:{user1}', 'username'), hmget(f'user:{user2}', 'username')]}, False))
 
-    def add_post(self, post):
-        pending_awaits = {*()}
-        future_0 = AppRequest('LPUSH', 'user:id:%s:posts' % self.id, post.id)
-        pending_awaits.add(future_0)
-        future_1 = AppRequest('LPUSH', 'user:id:%s:timeline' % self.id, post.id)
+def init_redis():
+    pending_awaits = {*()}
+    future_0 = AppRequest('EXISTS', 'total_users')
+    pending_awaits.add(future_0)
+    total_users_exist = AppResponse(future_0)
+    pending_awaits.remove(future_0)
+    if not total_users_exist:
+        future_1 = AppRequest('SET', 'total_users', 0)
         pending_awaits.add(future_1)
-        future_2 = AppRequest('SADD', 'posts:id', post.id)
+        future_2 = AppRequest('SET', f'room:0:name', 'General')
         pending_awaits.add(future_2)
-        return (pending_awaits, None)
+        demo_data.create()
+    return (pending_awaits, None)
 
-    def add_timeline_post(self, post):
-        pending_awaits = {*()}
-        future_0 = AppRequest('LPUSH', 'user:id:%s:timeline' % self.id, post.id)
-        pending_awaits.add(future_0)
-        return (pending_awaits, None)
-
-    def add_mention(self, post):
-        pending_awaits = {*()}
-        future_0 = AppRequest('LPUSH', 'user:id:%s:mentions' % self.id, post.id)
-        pending_awaits.add(future_0)
-        return (pending_awaits, None)
-
-    def follow(self, user):
-        pending_awaits = {*()}
-        if user == self:
-            return (pending_awaits, None)
-        else:
-            future_0 = AppRequest('SADD', 'user:id:%s:followees' % self.id, user.id)
-            pending_awaits.add(future_0)
-            pending_awaits_add_follower, _ = user.add_follower(self)
-            pending_awaits.update(pending_awaits_add_follower)
-        return (pending_awaits, None)
-
-    def stop_following(self, user):
-        pending_awaits = {*()}
-        future_0 = AppRequest('SREM', 'user:id:%s:followees' % self.id, user.id)
-        pending_awaits.add(future_0)
-        pending_awaits_remove_follower, _ = user.remove_follower(self)
-        pending_awaits.update(pending_awaits_remove_follower)
-        return (pending_awaits, None)
-
-    def following(self, user):
-        pending_awaits = {*()}
-        future_0 = AppRequest('SISMEMBER', 'user:id:%s:followees' % self.id, user.id)
-        pending_awaits.add(future_0)
-        async_cond_0 = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        if async_cond_0:
-            return (pending_awaits, True)
-        return (pending_awaits, False)
-
-    @property
-    def followers(self):
-        pending_awaits = {*()}
-        future_0 = AppRequest('SMEMBERS', 'user:id:%s:followers' % self.id)
-        pending_awaits.add(future_0)
-        followers = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        if followers:
-            future_1 = AppRequest('LRANGE', 'timeline', _from, _to)
-            pending_awaits.add(future_1)
-            return_posts = []
-            async_iter_0 = AppResponse(future_1)
-            pending_awaits.remove(future_1)
-            for user_id in async_iter_0:
-                return_posts.append(User(int(user_id)))
-            return (pending_awaits, return_posts)
-        return (pending_awaits, [])
-
-    @property
-    def followees(self):
-        pending_awaits = {*()}
-        future_0 = AppRequest('SMEMBERS', 'user:id:%s:followees' % self.id)
-        pending_awaits.add(future_0)
-        followees = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        if followees:
-            future_1 = AppRequest('LRANGE', 'timeline', _from, _to)
-            pending_awaits.add(future_1)
-            return_posts = []
-            async_iter_0 = AppResponse(future_1)
-            pending_awaits.remove(future_1)
-            for user_id in async_iter_0:
-                return_posts.append(User(int(user_id)))
-            return (pending_awaits, return_posts)
-        return (pending_awaits, [])
-
-    @property
-    def tweet_count(self):
-        pending_awaits = {*()}
-        future_0 = AppRequest('LLEN', 'user:id:%s:posts' % self.id)
-        pending_awaits.add(future_0)
-        async_return_0 = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        return (pending_awaits, async_return_0 or 0)
-
-    @property
-    def followees_count(self):
-        pending_awaits = {*()}
-        future_0 = AppRequest('SCARD', 'user:id:%s:followees' % self.id)
-        pending_awaits.add(future_0)
-        async_return_0 = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        return (pending_awaits, async_return_0 or 0)
-
-    @property
-    def followers_count(self):
-        pending_awaits = {*()}
-        future_0 = AppRequest('SCARD', 'user:id:%s:followers' % self.id)
-        pending_awaits.add(future_0)
-        async_return_0 = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        return (pending_awaits, async_return_0 or 0)
-
-    def add_follower(self, user):
-        pending_awaits = {*()}
-        future_0 = AppRequest('SADD', 'user:id:%s:followers' % self.id, user.id)
-        pending_awaits.add(future_0)
-        return (pending_awaits, None)
-
-    def remove_follower(self, user):
-        pending_awaits = {*()}
-        future_0 = AppRequest('SREM', 'user:id:%s:followers' % self.id, user.id)
-        pending_awaits.add(future_0)
-        return (pending_awaits, None)
-
-class Post(Model):
-
-    @staticmethod
-    def create(user, content):
-        pending_awaits = {*()}
-        future_0 = AppRequest('INCR', 'post:uid')
-        pending_awaits.add(future_0)
-        post_id = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        post = Post(post_id)
-        post.content = content
-        post.user_id = user.id
-        pending_awaits_add_post, _ = user.add_post(post)
-        pending_awaits.update(pending_awaits_add_post)
-        future_1 = AppRequest('LPUSH', 'timeline', post_id)
-        pending_awaits.add(future_1)
-        for follower in user.followers:
-            follower.add_timeline_post(post)
-        mentions = re.findall('@\\w+', content)
-        for mention in mentions:
-            u = User.find_by_username(mention[1:])
-            if u:
-                pending_awaits_add_mention, _ = u.add_mention(post)
-                pending_awaits.update(pending_awaits_add_mention)
-        return (pending_awaits, None)
-
-    @staticmethod
-    def find_by_id(id):
-        pending_awaits = {*()}
-        future_0 = AppRequest('SISMEMBER', 'posts:id', int(id))
-        pending_awaits.add(future_0)
-        async_cond_0 = AppResponse(future_0)
-        pending_awaits.remove(future_0)
-        if async_cond_0:
-            return (pending_awaits, Post(id))
-        return (pending_awaits, None)
-
-    @property
-    def user(self):
-        pending_awaits = {*()}
-        return (pending_awaits, User.find_by_id(r.get('post:id:%s:user_id' % self.id)))
-
-def main():
-    pass
-if __name__ == '__main__':
-    main()
+def event_stream():
+    pending_awaits = {*()}
+    future_0 = AppRequest('PUBSUB')
+    pending_awaits.add(future_0)
+    pubsub = AppResponse(future_0)
+    pending_awaits.remove(future_0)
+    pubsub.subscribe('MESSAGES')
+    pubsub = AppResponse(future_0)
+    pending_awaits.remove(future_0)
+    for message in pubsub.listen():
+        message_parsed = json.loads(message['data'])
+        if message_parsed['serverId'] == SERVER_ID:
+            continue
+        data = 'data:  %s\n\n' % json.dumps({'type': message_parsed['type'], 'data': message_parsed['data']})
+        yield data
     return (pending_awaits, None)
