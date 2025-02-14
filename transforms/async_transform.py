@@ -66,7 +66,7 @@ class AsyncTransformer(ast.NodeTransformer):
                 app_response_assign = self.copy_location(ast.Assign(
                     targets=node.targets,
                     value=ast.Call(
-                        func=ast.Name(id='Ap`pR`esponse', ctx=ast.Load()),
+                        func=ast.Name(id='AppResponse', ctx=ast.Load()),
                         args=[ast.Name(id=future_var, ctx=ast.Load())],
                         keywords=[]
                     )

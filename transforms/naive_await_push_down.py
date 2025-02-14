@@ -48,6 +48,7 @@ class AwaitMover(ast.NodeTransformer):
         self.counter = 0
 
     def visit_FunctionDef(self, node):
+        print(f"\n\n\nChecking new function: {node.name}")
         # we don't need to check nodes that aren't in the set of async functions
         if node.name not in self.async_funcs:
             return node
@@ -58,44 +59,38 @@ class AwaitMover(ast.NodeTransformer):
             for dec in node.decorator_list
         )
         self.var_dependencies.clear()
+        print("Variable dependnecies are cleared")
         self.all_awaits = set()
 
-        # get comments
-        # docstring = self.get_docstring(node)
-        # if docstring:
-        #     node.body.insert(0, ast.Expr(ast.Str(s=docstring)))
-
-        # create array of pending awaits
-        print("STARTING PROCESSE BODY")
         node.body = self.process_body(node.body)
-        print("FINISH PROCESSE BODY")
         pending_awaits_init = ast.Assign(
             targets=[ast.Name(id="pending_awaits", ctx=ast.Store())],
             value=ast.Set(elts=[], ctx=ast.Load()),  # This will create just {}
         )
         node.body.insert(0, pending_awaits_init)
 
-
         return node
 
     def process_body(self, body):
-        print("Process body being called")
         self.nesting += 1
+        
 
-        print("Depth: ", self.nesting)
         final_body = []
         counter = 0
-
+        
         for stmt in body:
             self.counter+=1
             stmt = self.visit(stmt)
             variables_used = get_variables_used(stmt)
 
             if self.is_app_response_call(stmt):
+                print("IS APP RESPONSE CALL", ast.unparse(stmt))
                 self.all_awaits.add(stmt)
                 await_variable_names = self.get_future_names(stmt)
+                print("Await variable names asosciated with statement", await_variable_names)
 
                 # add dependencies
+                print("All await variable names", await_variable_names)
                 for name in await_variable_names:
                     self.var_dependencies[name] = stmt
 
@@ -137,6 +132,9 @@ class AwaitMover(ast.NodeTransformer):
                 variables_to_remove = variables_used.intersection(
                     self.var_dependencies.keys()
                 )
+                print("Variables used", variables_used)
+                print("DEPENDENCEIS", self.var_dependencies.keys())
+                print("NEED TO REMOVE", variables_to_remove)
 
                 for variable_name in variables_to_remove:
                     stmt_append = self.var_dependencies[variable_name]
@@ -193,6 +191,7 @@ class AwaitMover(ast.NodeTransformer):
                 )
             )
         self.nesting -= 1
+        self.var_dependencies.clear()
         return final_body
 
     def is_ensure_future_call(self, node):
@@ -290,12 +289,10 @@ class AwaitMover(ast.NodeTransformer):
         # Check for expression statements
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
             if isinstance(node.value.func, ast.Name):
-                print("Returning true for apprequest call")
                 return node.value.func.id == 'AppRequest'
         # Check for assignments where the value is an AppRequest call
         elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
             if isinstance(node.value.func, ast.Name):
-                print("Returning true for apprequest call")
                 return node.value.func.id == 'AppRequest'
 
         return False
@@ -321,24 +318,12 @@ class AwaitMover(ast.NodeTransformer):
         return node
 
     def visit_For(self, node):
-        # Print each line in the for loop body before processing
-        for idx, stmt in enumerate(node.body):
-            print(f"FOR LOOP LINE {idx + 1}: {ast.unparse(stmt)}")
-        
         # Process the entire body of the for loop at once
         processed_body = self.process_body(node.body)
         
         # Replace the original body with processed body
         node.body = processed_body
         
-        return self.generic_visit(node)
-
-    def visit_With(self, node):
-        print(f"VISITING WITH STATEMENT\n\n")
-        return self.generic_visit(node)
-
-    def visit_Try(self, node):
-        print(f"VISITING TRY STATEMENT\n\n")
         return self.generic_visit(node)
 
     def create_await_loop(self):

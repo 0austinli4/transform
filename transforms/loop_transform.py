@@ -127,6 +127,13 @@ class AwaitMover(ast.NodeTransformer):
     #     return used_vars
 
     def visit_FunctionDef(self, node):
+        is_loop_optimization = any(
+            isinstance(dec, ast.Name) and dec.id == "enable_loop_optimization"
+            for dec in node.decorator_list
+        )
+        if not is_loop_optimization:
+            return node
+
         self.var_dependencies.clear()
         self.all_awaits = set()
         node.body = self.process_body(node.body)
@@ -140,6 +147,7 @@ class AwaitMover(ast.NodeTransformer):
                 )
             )
             node.body.insert(0, dep_vars_init)
+
             self.is_for_loop_with_apprequest = False
         return node
 
@@ -150,7 +158,6 @@ class AwaitMover(ast.NodeTransformer):
         for stmt in body:
             # Check if the statement is an AppResponse call
             if self.is_app_response_call(stmt):
-                print("Found AppResponse call")
                 continue
             
             result = self.visit(stmt)
@@ -186,9 +193,23 @@ class AwaitMover(ast.NodeTransformer):
         # PASS 1 - FIND APPRESPONSE CALLS 
         for stmt in node.body:
             # Identify AppResponse calls
+            if self.is_pending_await_remove(stmt):
+                continue
             if self.is_app_response_call(stmt):
-                # print("[DEBUG] Found AppResponse call")
+                # first_for_loop.pop()
+                # Modify the AppResponse call to use dep_var_queue.pop()
                 app_response_produced.update([target.id for target in stmt.targets])
+                stmt.value.args = [
+                    ast.Call(
+                        func=ast.Attribute(
+                            value=ast.Name(id='dep_vars_queue', ctx=ast.Load()),
+                            attr='popleft',
+                            ctx=ast.Load()
+                        ),
+                        args=[],
+                        keywords=[]
+                    )
+                ]
                 # add to second for loop
                 second_for_loop.append(stmt)
                 self.is_for_loop_with_apprequest = True
@@ -197,7 +218,7 @@ class AwaitMover(ast.NodeTransformer):
             vars_produced_first_pass.update(get_variables_produced(stmt))
 
             for var in vars_used_from_app_response:
-                if var not in vars_produced_first_pass:
+                if var not in vars_produced_first_pass or 'future' in var:
                     continue
                 dep_vars_queue_add = ast.Expr(
                     value=ast.Call(
@@ -228,6 +249,19 @@ class AwaitMover(ast.NodeTransformer):
             else:
                 first_for_loop.append(stmt)
         
+        if not self.is_for_loop_with_apprequest:
+            return node
+
+        for stmt in node.body:
+            if self.is_pending_await_add(stmt):
+                # Transform to dep_vars_queue.append()
+                stmt.value.func = ast.Attribute(
+                    value=ast.Name(id='dep_vars_queue', ctx=ast.Load()),
+                    attr='append',
+                    ctx=ast.Load()
+                )
+
+
         for stmt in dep_statements_second_loop:
             # Check if any variables used in the statement are in variable_queue
             vars_used = get_variables_used(stmt)
@@ -271,13 +305,28 @@ class AwaitMover(ast.NodeTransformer):
             return [node, app_response_loop]
         return node
 
+    def is_pending_await_add(self, stmt):
+        return (isinstance(stmt, ast.Expr) and 
+                isinstance(stmt.value, ast.Call) and 
+                isinstance(stmt.value.func, ast.Attribute) and
+                isinstance(stmt.value.func.value, ast.Name) and
+                stmt.value.func.value.id == 'pending_awaits' and
+                stmt.value.func.attr == 'add')
+
+    def is_pending_await_remove(self, stmt):
+        return (isinstance(stmt, ast.Expr) and 
+                isinstance(stmt.value, ast.Call) and 
+                isinstance(stmt.value.func, ast.Attribute) and
+                isinstance(stmt.value.func.value, ast.Name) and
+                stmt.value.func.value.id == 'pending_awaits' and
+                stmt.value.func.attr == 'remove')
+            
     def visit_Assign(self, node):
         # Check for AppResponse calls in assignments
         if (isinstance(node.value, ast.Call) and 
             isinstance(node.value.func, ast.Name) and 
             node.value.func.id == "AppResponse"):
-            # Skip this assignment in the first pass
-            print("Found AppResponse call")
+            # skip assignment
             return None
         return node
 

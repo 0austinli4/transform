@@ -39,18 +39,18 @@ print("Async calls", async_calls)
 
 # async transform
 async_code, external_functions = async_form(source_code, functions_we_should_change, async_calls)
-print_to_file(async_code, "async_code.py")
+print_to_file(async_code, "intermediate_transform/async_code.py")
 
 # async future push up
 async_push_up_code = async_future(async_code, external_functions)
-print_to_file(async_push_up_code, "push_up.py")
+print_to_file(async_push_up_code, "intermediate_transform/push_up.py")
 
 # # await push down code
 await_push_down_code = await_push(async_push_up_code, external_functions, functions_we_should_change)
 print_to_file(await_push_down_code, "final_code.py")
 
 # loop push down code
-# loop_push_down_code = loop_push(await_push_down_code, external_functions, functions_we_should_change)
-# print_to_file(loop_push_down_code, "final_code_loop_push.py")
+loop_push_down_code = loop_push(await_push_down_code, external_functions, functions_we_should_change)
+print_to_file(loop_push_down_code, "final_code_loop_optimization.py")
 
 print("All commands executed successfully.")
