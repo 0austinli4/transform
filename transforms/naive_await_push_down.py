@@ -2,7 +2,6 @@ import ast
 import argparse
 import os
 
-
 class VariableCollector(ast.NodeVisitor):
     def __init__(self):
         self.variables = set()
@@ -10,7 +9,6 @@ class VariableCollector(ast.NodeVisitor):
     def visit_Call(self, node):
         if isinstance(node.func, ast.Attribute):
             self.visit(node.func.value)
-
         for arg in node.args:
             self.visit(arg)
         for keyword in node.keywords:
@@ -46,6 +44,8 @@ class AwaitMover(ast.NodeTransformer):
         self.nesting = 0
         # stores all variable dependencies
         self.var_dependencies = {}
+        self.is_main_method = False
+        self.counter = 0
 
     def visit_FunctionDef(self, node):
         # we don't need to check nodes that aren't in the set of async functions
@@ -53,7 +53,7 @@ class AwaitMover(ast.NodeTransformer):
             return node
 
         # check specifically for main method
-        is_main_method = any(
+        self.is_main_method = any(
             isinstance(dec, ast.Name) and dec.id == "main_method"
             for dec in node.decorator_list
         )
@@ -66,34 +66,40 @@ class AwaitMover(ast.NodeTransformer):
         #     node.body.insert(0, ast.Expr(ast.Str(s=docstring)))
 
         # create array of pending awaits
+        print("STARTING PROCESSE BODY")
         node.body = self.process_body(node.body)
+        print("FINISH PROCESSE BODY")
         pending_awaits_init = ast.Assign(
             targets=[ast.Name(id="pending_awaits", ctx=ast.Store())],
             value=ast.Set(elts=[], ctx=ast.Load()),  # This will create just {}
         )
         node.body.insert(0, pending_awaits_init)
 
-        if is_main_method:
-            node = self.handle_main_method(node)
+
         return node
 
     def process_body(self, body):
+        print("Process body being called")
         self.nesting += 1
+
+        print("Depth: ", self.nesting)
         final_body = []
+        counter = 0
 
         for stmt in body:
+            self.counter+=1
             stmt = self.visit(stmt)
             variables_used = get_variables_used(stmt)
 
-            if self.is_await_call(stmt):
+            if self.is_app_response_call(stmt):
                 self.all_awaits.add(stmt)
-                await_variable_names = self.get_await_variable_name(stmt)
+                await_variable_names = self.get_future_names(stmt)
 
                 # add dependencies
                 for name in await_variable_names:
                     self.var_dependencies[name] = stmt
 
-            elif self.is_ensure_future_call(stmt):
+            elif self.is_app_request_call(stmt):
                 assigned_var = stmt.targets[0]
                 append_stmt = ast.Expr(
                     value=ast.Call(
@@ -108,9 +114,15 @@ class AwaitMover(ast.NodeTransformer):
                 )
                 final_body.append(stmt)
                 final_body.append(append_stmt)
+                # final_body.append(ast.Expr(value=ast.Constant(value="", kind=None)))
 
             elif self.is_async_function_call(stmt):
-                func_name = stmt.value.func.id
+                # Get function name handling both direct calls and attribute calls
+                if isinstance(stmt.value.func, ast.Name):
+                    func_name = stmt.value.func.id
+                else:  # ast.Attribute
+                    func_name = stmt.value.func.attr
+
                 pending_var = f"pending_awaits_{func_name}"
 
                 # Assign for pending variable
@@ -129,7 +141,7 @@ class AwaitMover(ast.NodeTransformer):
                 for variable_name in variables_to_remove:
                     stmt_append = self.var_dependencies[variable_name]
                     final_body.append(stmt_append)
-                    # Create AST node for `pending_awaits.remove(stmt_append)`
+                    # Create AST node for `pending_awaits.remove(future_0)`
                     remove_stmt = ast.Expr(
                         value=ast.Call(
                             func=ast.Attribute(
@@ -139,29 +151,31 @@ class AwaitMover(ast.NodeTransformer):
                             ),
                             args=[
                                 ast.Name(
-                                    id=stmt_append.value.value.id, ctx=ast.Load()
-                                ),  # Pass stmt_id as AST Name node
-                            ],  # Pass variable_name as an AST Name node
+                                    id=stmt_append.value.args[0].id,  
+                                    ctx=ast.Load()
+                                )
+                            ],
                             keywords=[],
                         )
                     )
-                    final_body.append(
-                        remove_stmt
-                    )  # Append remove statement to final_body
+                    final_body.append(remove_stmt)
                 if self.is_return_statement(stmt):
                     stmt = self.get_return_stmt(stmt)
+                    if self.is_main_method:
+                        final_body.append(self.create_await_loop())
                 final_body.append(stmt)
 
             elif self.is_return_statement(stmt) or self.is_external_function_call(stmt):
                 if self.is_return_statement(stmt):
                     stmt = self.get_return_stmt(stmt)
+                
+                if self.is_main_method or self.is_external_function_call(stmt):
+                    final_body.append(self.create_await_loop())
 
                 final_body.append(stmt)
+
             else:
                 final_body.append(stmt)
-        # Combine the processed statements
-        # extend all remaining current awaits
-
         if (
             not any(isinstance(node, ast.Return) for node in final_body)
             and self.nesting == 1
@@ -227,22 +241,64 @@ class AwaitMover(ast.NodeTransformer):
             if isinstance(stmt.value.value, ast.Name):
                 return [stmt.value.value.id]
         return None
+    
+    def get_future_names(self, stmt):
+        # Handle assignment statements
+        if isinstance(stmt, ast.Assign):
+            target = stmt.targets[0]
+            if isinstance(target, ast.Name):
+                return [target.id]
+            elif isinstance(target, ast.Tuple):
+                return [name.id for name in target.elts if isinstance(name, ast.Name)]
+            elif isinstance(target, ast.Attribute):
+                return [target.attr]
+        return []
 
     def is_async_function_call(self, stmt):
+        # Needs to handle both function calls and attribute calls
         # Handle expression statements
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
             if isinstance(stmt.value.func, ast.Name):
                 return stmt.value.func.id in self.async_funcs
+            elif isinstance(stmt.value.func, ast.Attribute):
+                return stmt.value.func.attr in self.async_funcs
         # Handle assignments
         elif isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Call):
             if isinstance(stmt.value.func, ast.Name):
                 return stmt.value.func.id in self.async_funcs
+            elif isinstance(stmt.value.func, ast.Attribute):
+                return stmt.value.func.attr in self.async_funcs
         return False
 
     def is_await_call(self, node):
         return (isinstance(node, ast.Expr) and isinstance(node.value, ast.Await)) or (
             isinstance(node, ast.Assign) and isinstance(node.value, ast.Await)
         )
+
+    def is_app_response_call(self, node):
+        # Check for expression statements
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            if isinstance(node.value.func, ast.Name):
+                return node.value.func.id == 'AppResponse'
+        # Check for assignments where the value is an AppResponse call
+        elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            if isinstance(node.value.func, ast.Name):
+                return node.value.func.id == 'AppResponse'
+        return False
+
+    def is_app_request_call(self, node):
+        # Check for expression statements
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            if isinstance(node.value.func, ast.Name):
+                print("Returning true for apprequest call")
+                return node.value.func.id == 'AppRequest'
+        # Check for assignments where the value is an AppRequest call
+        elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            if isinstance(node.value.func, ast.Name):
+                print("Returning true for apprequest call")
+                return node.value.func.id == 'AppRequest'
+
+        return False
 
     def is_external_function_call(self, node):
         return (
@@ -264,14 +320,39 @@ class AwaitMover(ast.NodeTransformer):
                 node.orelse = self.process_body(node.orelse)
         return node
 
+    def visit_For(self, node):
+        # Print each line in the for loop body before processing
+        for idx, stmt in enumerate(node.body):
+            print(f"FOR LOOP LINE {idx + 1}: {ast.unparse(stmt)}")
+        
+        # Process the entire body of the for loop at once
+        processed_body = self.process_body(node.body)
+        
+        # Replace the original body with processed body
+        node.body = processed_body
+        
+        return self.generic_visit(node)
+
+    def visit_With(self, node):
+        print(f"VISITING WITH STATEMENT\n\n")
+        return self.generic_visit(node)
+
+    def visit_Try(self, node):
+        print(f"VISITING TRY STATEMENT\n\n")
+        return self.generic_visit(node)
+
     def create_await_loop(self):
         """Creates an AST for looping through and awaiting pending_awaits"""
         return ast.For(
-            target=ast.Name(id="await_stmt", ctx=ast.Store()),
+            target=ast.Name(id="future", ctx=ast.Store()),
             iter=ast.Name(id="pending_awaits", ctx=ast.Load()),
             body=[
                 ast.Expr(
-                    value=ast.Await(value=ast.Name(id="await_stmt", ctx=ast.Load()))
+                    value=ast.Call(
+                        func=ast.Name(id='AppResponse', ctx=ast.Load()),
+                        args=[ast.Name(id='future', ctx=ast.Load())],
+                        keywords=[]
+                    )
                 )
             ],
             orelse=[],
@@ -374,7 +455,7 @@ def main():
             source_code = f.read()
 
         tree = ast.parse(source_code)
-        transformer = AwaitMover()
+        transformer = AwaitMover([], [])
         transformed_tree = transformer.visit(tree)
         ast.fix_missing_locations(transformed_tree)
 

@@ -74,7 +74,7 @@ class AsyncFuturePushUp(ast.NodeTransformer):
                 future_calls = []
                 temp_body = []
                 vars_produced = set()
-            elif self.is_ensure_future_call(stmt):
+            elif self.is_app_request_call(stmt):
                 variables_used = get_variables_used(stmt)
 
                 if variables_used.intersection(vars_produced):
@@ -124,13 +124,16 @@ class AsyncFuturePushUp(ast.NodeTransformer):
             raise Exception("no insertion point found")
         return temp_body
 
-    def is_ensure_future_call(self, node):
-        return (
-            isinstance(node, ast.Assign)
-            and isinstance(node.value, ast.Call)
-            and isinstance(node.value.func, ast.Attribute)
-            and node.value.func.attr == "ensure_future"
-        )
+    def is_app_request_call(self, node):
+        # Check for expression statements
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            if isinstance(node.value.func, ast.Name):
+                return node.value.func.id == 'AppRequest'
+        # Check for assignments where the value is an AppRequest call
+        elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
+            if isinstance(node.value.func, ast.Name):
+                return node.value.func.id == 'AppRequest'
+        return False
 
     def is_external_function_call(self, node):
         return (

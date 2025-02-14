@@ -15,7 +15,6 @@ class FunctionCollector(ast.NodeVisitor):
 
 class AsyncTransformer(ast.NodeTransformer):
     def __init__(self, functions_calling_async,  async_calls):
-        self.functions_calling_async = set(functions_calling_async)
         self.async_calls = set(async_calls)
         self.transformed_functions = set()
         self.temp_var_counter = 0
@@ -46,13 +45,14 @@ class AsyncTransformer(ast.NodeTransformer):
 
     def visit_Call(self, node):
         func_name = self.get_func_name(node)
-        if func_name in self.async_calls:
+        if func_name in self.async_calls or any(call in self.async_calls for call in [func_name]):
             return self.transform_async_call(node)
         return node
 
     def visit_Assign(self, node):
         if isinstance(node.value, ast.Call):
             func_name = self.get_func_name(node.value)
+            
             if func_name in self.async_calls:
                 future_var = f"future_{self.future_counter}"
                 self.future_counter += 1
@@ -63,12 +63,16 @@ class AsyncTransformer(ast.NodeTransformer):
                     value=ensure_future_call
                 ), node)
                 
-                await_assign = self.copy_location(ast.Assign(
+                app_response_assign = self.copy_location(ast.Assign(
                     targets=node.targets,
-                    value=ast.Await(value=ast.Name(id=future_var, ctx=ast.Load()))
+                    value=ast.Call(
+                        func=ast.Name(id='Ap`pR`esponse', ctx=ast.Load()),
+                        args=[ast.Name(id=future_var, ctx=ast.Load())],
+                        keywords=[]
+                    )
                 ), node)
                 
-                return [future_assign, await_assign]
+                return [future_assign, app_response_assign]
         return node
 
     def visit_Expr(self, node):
@@ -84,11 +88,15 @@ class AsyncTransformer(ast.NodeTransformer):
                     value=ensure_future_call
                 ), node)
                 
-                await_expr = self.copy_location(ast.Expr(
-                    value=ast.Await(value=ast.Name(id=future_var, ctx=ast.Load()))
+                app_response_expr = self.copy_location(ast.Expr(
+                    value=ast.Call(
+                        func=ast.Name(id='AppResponse', ctx=ast.Load()),
+                        args=[ast.Name(id=future_var, ctx=ast.Load())],
+                        keywords=[]
+                    )
                 ), node)
                 
-                return [future_assign, await_expr]
+                return [future_assign, app_response_expr]
         return node
 
     def visit_If(self, node):
@@ -133,9 +141,13 @@ class AsyncTransformer(ast.NodeTransformer):
                 value=self.transform_async_call(node.iter)
             ), node)
             
-            await_assign = self.copy_location(ast.Assign(
+            app_response_assign = self.copy_location(ast.Assign(
                 targets=[ast.Name(id=iter_var, ctx=ast.Store())],
-                value=ast.Await(value=ast.Name(id=future_var, ctx=ast.Load()))
+                value=ast.Call(
+                    func=ast.Name(id='AppResponse', ctx=ast.Load()),
+                    args=[ast.Name(id=future_var, ctx=ast.Load())],
+                    keywords=[]
+                )
             ), node)
             
             new_for = self.copy_location(ast.For(
@@ -145,7 +157,7 @@ class AsyncTransformer(ast.NodeTransformer):
                 orelse=[self.visit(stmt) for stmt in node.orelse]
             ), node)
             
-            return [future_assign, await_assign, new_for]
+            return [future_assign, app_response_assign, new_for]
         else:
             node.iter = self.visit(node.iter)
             node.body = [self.visit(stmt) for stmt in node.body]
@@ -162,12 +174,17 @@ class AsyncTransformer(ast.NodeTransformer):
                 value=self.transform_async_call(node)
             ), node)
             
-            await_expr = self.copy_location(ast.Expr(
-                value=ast.Await(value=ast.Name(id=iter_var, ctx=ast.Load()))
+            app_response_expr = self.copy_location(ast.Expr(
+                value=ast.Call(
+                    func=ast.Name(id='AppResponse', ctx=ast.Load()),
+                    args=[ast.Name(id=iter_var, ctx=ast.Load())],
+                    keywords=[]
+                )
             ), node)
             
-            return ast.Name(id=iter_var, ctx=ast.Load()), [iter_assign, await_expr]
+            return ast.Name(id=iter_var, ctx=ast.Load()), [iter_assign, app_response_expr]
         return node, []
+
     def transform_condition(self, node):
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
             transformed_operand, assignments = self.transform_condition(node.operand)
@@ -183,12 +200,16 @@ class AsyncTransformer(ast.NodeTransformer):
                 value=self.transform_async_call(node)
             ), node)
             
-            await_assign = self.copy_location(ast.Assign(
+            app_response_assign = self.copy_location(ast.Assign(
                 targets=[ast.Name(id=cond_var, ctx=ast.Store())],
-                value=ast.Await(value=ast.Name(id=future_var, ctx=ast.Load()))
+                value=ast.Call(
+                    func=ast.Name(id='AppResponse', ctx=ast.Load()),
+                    args=[ast.Name(id=future_var, ctx=ast.Load())],
+                    keywords=[]
+                )
             ), node)
             
-            return ast.Name(id=cond_var, ctx=ast.Load()), [future_assign, await_assign]
+            return ast.Name(id=cond_var, ctx=ast.Load()), [future_assign, app_response_assign]
         return node, []
 
     def is_async_call(self, node):
@@ -198,20 +219,38 @@ class AsyncTransformer(ast.NodeTransformer):
         if isinstance(node.func, ast.Name):
             return node.func.id
         elif isinstance(node.func, ast.Attribute):
-            return node.func.attr
+            parts = []
+            current = node.func
+            while isinstance(current, ast.Attribute):
+                parts.append(current.attr)
+                current = current.value
+            if isinstance(current, ast.Name):
+                parts.append(current.id)
+            return '.'.join(reversed(parts))
         return None
 
     def transform_async_call(self, node):
-        return ast.Call(
-            func=ast.Attribute(
-                value=ast.Name(id='asyncio', ctx=ast.Load()),
-                attr='ensure_future',
-                ctx=ast.Load()
-            ),
-            args=[node],
-            keywords=[]
-        )
+        func_name = self.get_func_name(node)
 
+        ## this is modifiable - redis_client can be whatever the user has set redis to
+        if func_name and 'redis_client' in func_name:
+            # Extract the Redis operation (after 'r.')
+            redis_op = func_name.split('.')[-1].upper()
+            
+            # Create AppRequest call
+            return ast.Call(
+                func=ast.Name(id='AppRequest', ctx=ast.Load()),
+                args=[
+                    ast.Constant(value=redis_op),
+                    *node.args  # Pass through the original arguments
+                ],
+                keywords=[]
+            )
+        
+        # Default to ensure_future for non-Redis calls
+        raise ValueError(f"Cannot use AppRequest with non-Redis call: {func_name}. "
+        "This method is not marked for async transformation.")
+    
     def copy_location(self, new_node, old_node):
         ast.copy_location(new_node, old_node)
         ast.fix_missing_locations(new_node)
@@ -226,13 +265,10 @@ def collect_top_level_functions(source_code):
 
 def async_form(source_code, functions_calling_async, async_calls):
     external_function_calls = collect_top_level_functions(source_code)
-
+    
     tree = ast.parse(source_code)
     
     # Add asyncio import
-    asyncio_import = ast.Import(names=[ast.alias(name='asyncio', asname=None)])
-    tree.body.insert(0, asyncio_import)
-
     transformer = AsyncTransformer(functions_calling_async, async_calls)
     transformed_tree = transformer.visit(tree)
 
@@ -253,7 +289,6 @@ def main():
 
 
     for input_file in args.input_files:
-        collect_top_level_functions(input_file)
         with open(input_file, 'r') as f:
             source_code = f.read()
     
