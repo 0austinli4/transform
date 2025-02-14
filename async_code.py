@@ -9,3 +9,4 @@ def init_redis():
         future_2 = asyncio.ensure_future(redis_client.set(f'room:0:name', 'General'))
         await future_2
         demo_data.create()
+    print("Hel")
