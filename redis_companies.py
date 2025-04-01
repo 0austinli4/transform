@@ -18,7 +18,7 @@ class RankSortKeys(enum.Enum):
 class RedisClient:
     def __init__(self):
         return True
-
+    @top_level
     def set_init_data(self):
         with open(
             os.path.join(settings.BASE_DIR, "companies_data.json"), "r"
@@ -44,7 +44,7 @@ class RedisClient:
                     error_message = f"Redis connection time out to {settings.REDIS_HOST}:{settings.REDIS_PORT}."
                 logger.error(error_message)
                 return
-
+    
     @staticmethod
     def add_prefix_to_symbol(prefix, symbol):
         return f"{prefix}:{symbol}"
@@ -55,13 +55,14 @@ class RedisClient:
 
 
 class CompaniesRanks(RedisClient):
+    @top_level
     def update_company_market_capitalization(self, amount, symbol):
         self.redis_client.zincrby(
             settings.REDIS_LEADERBOARD,
             amount,
             self.add_prefix_to_symbol(settings.REDIS_PREFIX, symbol),
         )
-
+    @top_level
     def get_ranks_by_sort_key(self, key):
         sort_key = RankSortKeys(key)
 
@@ -71,15 +72,18 @@ class CompaniesRanks(RedisClient):
             return self.get_zrange(0, 9)
         elif sort_key is RankSortKeys.BOTTOM10:
             return self.get_zrange(0, 9, False)
-
+    @top_level
+    @enable_loop_optimization
     def get_ranks_by_symbols(self, symbols):
-        companies_capitalization = [
-            self.redis_client.zscore(
+        companies_capitalization = []
+
+        for symbol in symbols:
+            zscore = self.redis_client.zscore(
                 settings.REDIS_LEADERBOARD,
                 self.add_prefix_to_symbol(settings.REDIS_PREFIX, symbol),
             )
-            for symbol in symbols
-        ]
+            companies_capitalization.append(zscore)
+
         companies = []
 
         for index, market_capitalization in enumerate(companies_capitalization):
@@ -91,7 +95,7 @@ class CompaniesRanks(RedisClient):
             )
 
         return self.get_result(companies)
-
+    @top_level
     def get_zrange(self, start_index, stop_index, desc=True):
         query_args = {
             "name": settings.REDIS_LEADERBOARD,
@@ -107,7 +111,7 @@ class CompaniesRanks(RedisClient):
             companies = self.redis_client.zrange(**query_args)
 
         return self.get_result(companies, start_index, desc)
-
+    @top_level
     @enable_loop_optimization
     def get_result(self, companies, start_index=0, desc=True):
         start_rank = int(start_index) + 1 if desc else (len(companies) - start_index)

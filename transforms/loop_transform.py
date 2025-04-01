@@ -37,8 +37,7 @@ class VariableCollector(ast.NodeVisitor):
 def get_variables_used(stmt):
     collector = VariableCollector()
     collector.visit(stmt)
-    return (collector.variables)
-
+    return collector.variables
 
 
 class AwaitMover(ast.NodeTransformer):
@@ -59,13 +58,14 @@ class AwaitMover(ast.NodeTransformer):
         2. Variables that use AppResponse results
         """
         print(f"\n--- Tracking Dependencies for Node: {type(node)} ---")
-        
+
         # Track AppResponse variable assignments
-        if (isinstance(node, ast.Assign) and 
-            isinstance(node.value, ast.Call) and 
-            isinstance(node.value.func, ast.Name) and 
-            node.value.func.id == "AppResponse"):
-            
+        if (
+            isinstance(node, ast.Assign)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == "AppResponse"
+        ):
             # Get the target variable name
             if node.targets and isinstance(node.targets[0], ast.Name):
                 var_name = node.targets[0].id
@@ -81,12 +81,14 @@ class AwaitMover(ast.NodeTransformer):
             for used_var in used_vars:
                 if used_var in self.app_response_vars:
                     print(f"[DEBUG] Variable dependency: {used_var} used in assignment")
-                    
+
                     # Track the target variable
                     if node.targets and isinstance(node.targets[0], ast.Name):
                         target_var = node.targets[0].id
                         self.var_dependencies[target_var] = used_var
-                        print(f"[DEBUG] Dependency tracked: {target_var} depends on {used_var}")
+                        print(
+                            f"[DEBUG] Dependency tracked: {target_var} depends on {used_var}"
+                        )
 
         # Track method calls and subscript accesses
         if isinstance(node, ast.Call) or isinstance(node, ast.Subscript):
@@ -94,14 +96,16 @@ class AwaitMover(ast.NodeTransformer):
             print(f"[DEBUG] Used variables in call/subscript: {used_vars}")
             for used_var in used_vars:
                 if used_var in self.app_response_vars:
-                    print(f"[DEBUG] AppResponse variable used in method/subscript: {used_var}")
+                    print(
+                        f"[DEBUG] AppResponse variable used in method/subscript: {used_var}"
+                    )
 
     # def extract_used_vars(self, node):
     #     """
     #     Extract variable names used in a node
     #     """
     #     used_vars = set()
-        
+
     #     # Recursive extraction of variable names
     #     def extract(n):
     #         print(f"[EXTRACT] Examining node type: {type(n)}")
@@ -122,7 +126,7 @@ class AwaitMover(ast.NodeTransformer):
     #                 extract(arg)
     #             for kw in n.keywords:
     #                 extract(kw.value)
-        
+
     #     extract(node)
     #     return used_vars
 
@@ -141,10 +145,8 @@ class AwaitMover(ast.NodeTransformer):
             dep_vars_init = ast.Assign(
                 targets=[ast.Name(id="dep_vars_queue", ctx=ast.Store())],
                 value=ast.Call(
-                    func=ast.Name(id="deque", ctx=ast.Load()),
-                    args=[],
-                    keywords=[]
-                )
+                    func=ast.Name(id="deque", ctx=ast.Load()), args=[], keywords=[]
+                ),
             )
             node.body.insert(0, dep_vars_init)
 
@@ -159,7 +161,7 @@ class AwaitMover(ast.NodeTransformer):
             # Check if the statement is an AppResponse call
             if self.is_app_response_call(stmt):
                 continue
-            
+
             result = self.visit(stmt)
 
             if isinstance(result, list):
@@ -170,10 +172,14 @@ class AwaitMover(ast.NodeTransformer):
         return final_body
 
     def visit_For(self, node):
+        # if it's the await loop, ignore
+        if self.check_exact_await_loop(node):
+            return node
+
         app_response_produced = set()  # Variables related to AppResponse
         dependent_vars = set()  # Variables dependent on AppResponse
         variable_queue = deque()
-        
+
         # First pass: identify variables and dependencies
         first_for_loop = []
         second_for_loop = []
@@ -182,15 +188,15 @@ class AwaitMover(ast.NodeTransformer):
         dep_statements_second_loop = []
 
         # Pass 1: find all app response calls and the variables they produce
-            #do this by finding app response and get_vars_produced
+        # do this by finding app response and get_vars_produced
         # Pass 2: find all dependent variables to vars_produced_app_response
-            # move them to the second loop
+        # move them to the second loop
         # Pass 3: find if the dependent vars depend on anything above first AppResponse
-            # duplicate these
-            # queue object
-            # depdenedices by variables used vs. produed originally
-        
-        # PASS 1 - FIND APPRESPONSE CALLS 
+        # duplicate these
+        # queue object
+        # depdenedices by variables used vs. produed originally
+
+        # PASS 1 - FIND APPRESPONSE CALLS
         for stmt in node.body:
             # Identify AppResponse calls
             if self.is_pending_await_remove(stmt):
@@ -202,33 +208,33 @@ class AwaitMover(ast.NodeTransformer):
                 stmt.value.args = [
                     ast.Call(
                         func=ast.Attribute(
-                            value=ast.Name(id='dep_vars_queue', ctx=ast.Load()),
-                            attr='popleft',
-                            ctx=ast.Load()
+                            value=ast.Name(id="dep_vars_queue", ctx=ast.Load()),
+                            attr="popleft",
+                            ctx=ast.Load(),
                         ),
                         args=[],
-                        keywords=[]
+                        keywords=[],
                     )
                 ]
                 # add to second for loop
                 second_for_loop.append(stmt)
                 self.is_for_loop_with_apprequest = True
                 continue
-            
+
             vars_produced_first_pass.update(get_variables_produced(stmt))
 
             for var in vars_used_from_app_response:
-                if var not in vars_produced_first_pass or 'future' in var:
+                if var not in vars_produced_first_pass or "future" in var:
                     continue
                 dep_vars_queue_add = ast.Expr(
                     value=ast.Call(
                         func=ast.Attribute(
-                            value=ast.Name(id='dep_vars_queue', ctx=ast.Load()),
-                            attr='append',
-                            ctx=ast.Load()
+                            value=ast.Name(id="dep_vars_queue", ctx=ast.Load()),
+                            attr="append",
+                            ctx=ast.Load(),
                         ),
                         args=[ast.Name(id=var, ctx=ast.Load())],
-                        keywords=[]
+                        keywords=[],
                     )
                 )
                 first_for_loop.append(dep_vars_queue_add)
@@ -239,7 +245,7 @@ class AwaitMover(ast.NodeTransformer):
 
                 if set(vars_used).intersection(app_response_produced):
                     # Add each intersecting variable to dep_vars_queue
-                # if these have key words, then we need to move them
+                    # if these have key words, then we need to move them
                     second_for_loop.append(stmt)
                     dep_statements_second_loop.append(stmt)
                 else:
@@ -248,7 +254,7 @@ class AwaitMover(ast.NodeTransformer):
                 vars_used_from_app_response.extend(vars_used)
             else:
                 first_for_loop.append(stmt)
-        
+
         if not self.is_for_loop_with_apprequest:
             return node
 
@@ -256,17 +262,16 @@ class AwaitMover(ast.NodeTransformer):
             if self.is_pending_await_add(stmt):
                 # Transform to dep_vars_queue.append()
                 stmt.value.func = ast.Attribute(
-                    value=ast.Name(id='dep_vars_queue', ctx=ast.Load()),
-                    attr='append',
-                    ctx=ast.Load()
+                    value=ast.Name(id="dep_vars_queue", ctx=ast.Load()),
+                    attr="append",
+                    ctx=ast.Load(),
                 )
-
 
         for stmt in dep_statements_second_loop:
             # Check if any variables used in the statement are in variable_queue
             vars_used = get_variables_used(stmt)
             intersecting_vars = set(vars_used).intersection(variable_queue)
-            
+
             if intersecting_vars:
                 # Create a transformer to replace variables
                 class VariableReplacer(ast.NodeTransformer):
@@ -275,66 +280,74 @@ class AwaitMover(ast.NodeTransformer):
                             # Replace with dep_vars_queue.popleft()
                             return ast.Call(
                                 func=ast.Attribute(
-                                    value=ast.Name(id='dep_vars_queue', ctx=ast.Load()),
-                                    attr='popleft',
-                                    ctx=ast.Load()
+                                    value=ast.Name(id="dep_vars_queue", ctx=ast.Load()),
+                                    attr="popleft",
+                                    ctx=ast.Load(),
                                 ),
                                 args=[],
-                                keywords=[]
+                                keywords=[],
                             )
                         return node
-                
+
                 # Transform the statement
                 transformer = VariableReplacer()
                 modified_stmt = transformer.visit(stmt)
-                
+
                 # Replace the original statement with the modified one
                 second_for_loop[second_for_loop.index(stmt)] = modified_stmt
 
         # Update the for loop bodies
         node.body = first_for_loop
-        
+
         # If we found AppResponse calls or dependent lines, create a new for loop
         if second_for_loop:
             app_response_loop = ast.For(
                 target=node.target,
                 iter=node.iter,
                 body=second_for_loop,
-                orelse=node.orelse
+                orelse=node.orelse,
             )
             return [node, app_response_loop]
         return node
 
     def is_pending_await_add(self, stmt):
-        return (isinstance(stmt, ast.Expr) and 
-                isinstance(stmt.value, ast.Call) and 
-                isinstance(stmt.value.func, ast.Attribute) and
-                isinstance(stmt.value.func.value, ast.Name) and
-                stmt.value.func.value.id == 'pending_awaits' and
-                stmt.value.func.attr == 'add')
+        return (
+            isinstance(stmt, ast.Expr)
+            and isinstance(stmt.value, ast.Call)
+            and isinstance(stmt.value.func, ast.Attribute)
+            and isinstance(stmt.value.func.value, ast.Name)
+            and stmt.value.func.value.id == "pending_awaits"
+            and stmt.value.func.attr == "add"
+        )
 
     def is_pending_await_remove(self, stmt):
-        return (isinstance(stmt, ast.Expr) and 
-                isinstance(stmt.value, ast.Call) and 
-                isinstance(stmt.value.func, ast.Attribute) and
-                isinstance(stmt.value.func.value, ast.Name) and
-                stmt.value.func.value.id == 'pending_awaits' and
-                stmt.value.func.attr == 'remove')
-            
+        return (
+            isinstance(stmt, ast.Expr)
+            and isinstance(stmt.value, ast.Call)
+            and isinstance(stmt.value.func, ast.Attribute)
+            and isinstance(stmt.value.func.value, ast.Name)
+            and stmt.value.func.value.id == "pending_awaits"
+            and stmt.value.func.attr == "remove"
+        )
+
     def visit_Assign(self, node):
         # Check for AppResponse calls in assignments
-        if (isinstance(node.value, ast.Call) and 
-            isinstance(node.value.func, ast.Name) and 
-            node.value.func.id == "AppResponse"):
+        if (
+            isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == "AppResponse"
+        ):
             # skip assignment
             return None
         return node
 
     def visit_Expr(self, node):
         # Check for direct AppResponse calls
-        if (isinstance(node.value, ast.Call) and 
-            isinstance(node.value.func, ast.Name) and 
-            node.value.func.id == "AppResponse"):
+        if (
+            isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Name)
+            and node.value.func.id == "AppResponse"
+        ):
             # Skip this expression in the first pass
             return None
         return node
@@ -420,19 +433,23 @@ class AwaitMover(ast.NodeTransformer):
         )
 
     def is_app_response_call(self, stmt):
-        if (isinstance(stmt, ast.Assign) and 
-            isinstance(stmt.value, ast.Call) and 
-            isinstance(stmt.value.func, ast.Name) and 
-            stmt.value.func.id == "AppResponse"):
+        if (
+            isinstance(stmt, ast.Assign)
+            and isinstance(stmt.value, ast.Call)
+            and isinstance(stmt.value.func, ast.Name)
+            and stmt.value.func.id == "AppResponse"
+        ):
             return True
-        
+
         # Check for direct call pattern: AppResponse(x)
-        if (isinstance(stmt, ast.Expr) and 
-            isinstance(stmt.value, ast.Call) and 
-            isinstance(stmt.value.func, ast.Name) and 
-            stmt.value.func.id == "AppResponse"):
+        if (
+            isinstance(stmt, ast.Expr)
+            and isinstance(stmt.value, ast.Call)
+            and isinstance(stmt.value.func, ast.Name)
+            and stmt.value.func.id == "AppResponse"
+        ):
             return True
-        
+
         return False
 
     def is_app_request_call(self, node):
@@ -545,37 +562,55 @@ class AwaitMover(ast.NodeTransformer):
             )
         )
 
+    def check_exact_await_loop(self, node):
+        if (
+            isinstance(node.target, ast.Name)
+            and node.target.id == "future"
+            and isinstance(node.iter, ast.Name)
+            and node.iter.id == "pending_awaits"
+            and len(node.body) == 1
+            and isinstance(node.body[0], ast.Expr)
+            and isinstance(node.body[0].value, ast.Call)
+            and isinstance(node.body[0].value.func, ast.Name)
+            and node.body[0].value.func.id == "AppResponse"
+            and len(node.body[0].value.args) == 1
+            and isinstance(node.body[0].value.args[0], ast.Name)
+            and node.body[0].value.args[0].id == "future"
+            and not node.orelse
+        ):
+            return True  # Do nothing and return the original node
+
 
 def get_variables_produced(stmt):
     """
     Extract variable names that are produced (assigned) by a statement
-    
+
     Args:
         stmt (ast.AST): The AST node to analyze
-    
+
     Returns:
         set: Set of variable names produced by the statement
     """
     produced_vars = set()
-    
+
     # Handle assignment statements
     if isinstance(stmt, ast.Assign):
         for target in stmt.targets:
             # Handle simple name assignments
             if isinstance(target, ast.Name):
                 produced_vars.add(target.id)
-            
+
             # Handle tuple/list unpacking
             elif isinstance(target, (ast.Tuple, ast.List)):
                 for elt in target.elts:
                     if isinstance(elt, ast.Name):
                         produced_vars.add(elt.id)
-    
+
     # Handle augmented assignments (+=, -=, etc.)
     elif isinstance(stmt, ast.AugAssign):
         if isinstance(stmt.target, ast.Name):
             produced_vars.add(stmt.target.id)
-    
+
     # Handle for loop targets
     elif isinstance(stmt, ast.For):
         if isinstance(stmt.target, ast.Name):
@@ -584,7 +619,7 @@ def get_variables_produced(stmt):
             for elt in stmt.target.elts:
                 if isinstance(elt, ast.Name):
                     produced_vars.add(elt.id)
-    
+
     return produced_vars
 
 

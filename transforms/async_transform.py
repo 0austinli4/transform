@@ -237,12 +237,13 @@ class AsyncTransformer(ast.NodeTransformer):
             # Extract the Redis operation (after 'r.')
             redis_op = func_name.split('.')[-1].upper()
             
-            # Create AppRequest call
+            # Create AppRequest call with original arguments
             return ast.Call(
                 func=ast.Name(id='AppRequest', ctx=ast.Load()),
                 args=[
                     ast.Constant(value=redis_op),
-                    *node.args  # Pass through the original arguments
+                    *node.args,  # Pass through the original arguments
+                    *node.keywords  # Pass through the original keyword arguments
                 ],
                 keywords=[]
             )

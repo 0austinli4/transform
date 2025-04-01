@@ -16,6 +16,7 @@ class RedisClient:
     def __init__(self):
         return True
 
+    @top_level
     def set_init_data(self):
         with open(os.path.join(settings.BASE_DIR, 'companies_data.json'), 'r') as init_data:
             companies = json.load(init_data)
@@ -46,10 +47,12 @@ class RedisClient:
 
 class CompaniesRanks(RedisClient):
 
+    @top_level
     def update_company_market_capitalization(self, amount, symbol):
         future_0 = AppRequest('ZINCRBY', settings.REDIS_LEADERBOARD, amount, self.add_prefix_to_symbol(settings.REDIS_PREFIX, symbol))
         AppResponse(future_0)
 
+    @top_level
     def get_ranks_by_sort_key(self, key):
         sort_key = RankSortKeys(key)
         if sort_key is RankSortKeys.ALL:
@@ -59,23 +62,31 @@ class CompaniesRanks(RedisClient):
         elif sort_key is RankSortKeys.BOTTOM10:
             return self.get_zrange(0, 9, False)
 
+    @top_level
+    @enable_loop_optimization
     def get_ranks_by_symbols(self, symbols):
-        companies_capitalization = [self.redis_client.zscore(settings.REDIS_LEADERBOARD, self.add_prefix_to_symbol(settings.REDIS_PREFIX, symbol)) for symbol in symbols]
+        companies_capitalization = []
+        for symbol in symbols:
+            future_0 = AppRequest('ZSCORE', settings.REDIS_LEADERBOARD, self.add_prefix_to_symbol(settings.REDIS_PREFIX, symbol))
+            zscore = AppResponse(future_0)
+            companies_capitalization.append(zscore)
         companies = []
         for index, market_capitalization in enumerate(companies_capitalization):
             companies.append([self.add_prefix_to_symbol(settings.REDIS_PREFIX, symbols[index]), market_capitalization])
         return self.get_result(companies)
 
+    @top_level
     def get_zrange(self, start_index, stop_index, desc=True):
         query_args = {'name': settings.REDIS_LEADERBOARD, 'start': start_index, 'end': stop_index, 'withscores': True, 'score_cast_func': str}
         if desc:
-            future_0 = AppRequest('ZREVRANGE')
+            future_0 = AppRequest('ZREVRANGE', **query_args)
             companies = AppResponse(future_0)
         else:
-            future_1 = AppRequest('ZRANGE')
+            future_1 = AppRequest('ZRANGE', **query_args)
             companies = AppResponse(future_1)
         return self.get_result(companies, start_index, desc)
 
+    @top_level
     @enable_loop_optimization
     def get_result(self, companies, start_index=0, desc=True):
         start_rank = int(start_index) + 1 if desc else len(companies) - start_index
