@@ -100,44 +100,13 @@ class AwaitMover(ast.NodeTransformer):
                         f"[DEBUG] AppResponse variable used in method/subscript: {used_var}"
                     )
 
-    # def extract_used_vars(self, node):
-    #     """
-    #     Extract variable names used in a node
-    #     """
-    #     used_vars = set()
-
-    #     # Recursive extraction of variable names
-    #     def extract(n):
-    #         print(f"[EXTRACT] Examining node type: {type(n)}")
-    #         if isinstance(n, ast.Name):
-    #             used_vars.add(n.id)
-    #             print(f"[EXTRACT] Found variable name: {n.id}")
-    #         elif isinstance(n, ast.Attribute):
-    #             print(f"[EXTRACT] Found attribute: {n.attr}")
-    #             extract(n.value)
-    #         elif isinstance(n, ast.Subscript):
-    #             print(f"[EXTRACT] Found subscript")
-    #             extract(n.value)
-    #             extract(n.slice)
-    #         elif isinstance(n, ast.Call):
-    #             print(f"[EXTRACT] Found call")
-    #             extract(n.func)
-    #             for arg in n.args:
-    #                 extract(arg)
-    #             for kw in n.keywords:
-    #                 extract(kw.value)
-
-    #     extract(node)
-    #     return used_vars
-
     def visit_FunctionDef(self, node):
-        is_loop_optimization = any(
-            isinstance(dec, ast.Name) and dec.id == "enable_loop_optimization"
-            for dec in node.decorator_list
-        )
-        if not is_loop_optimization:
-            return node
-
+        # is_loop_optimization = any(
+        #     isinstance(dec, ast.Name) and dec.id == "enable_loop_optimization"
+        #     for dec in node.decorator_list
+        # )
+        # if not is_loop_optimization:
+        #     return node
         self.var_dependencies.clear()
         self.all_awaits = set()
         node.body = self.process_body(node.body)

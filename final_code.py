@@ -71,7 +71,6 @@ class CompaniesRanks(RedisClient):
             return self.get_zrange(0, 9, False)
 
     @top_level
-    @enable_loop_optimization
     def get_ranks_by_symbols(self, symbols):
         pending_awaits = {*()}
         companies_capitalization = []
@@ -107,7 +106,6 @@ class CompaniesRanks(RedisClient):
         return self.get_result(companies, start_index, desc)
 
     @top_level
-    @enable_loop_optimization
     def get_result(self, companies, start_index=0, desc=True):
         pending_awaits = {*()}
         start_rank = int(start_index) + 1 if desc else len(companies) - start_index

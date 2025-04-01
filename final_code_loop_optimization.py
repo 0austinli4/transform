@@ -71,7 +71,6 @@ class CompaniesRanks(RedisClient):
             return self.get_zrange(0, 9, False)
 
     @top_level
-    @enable_loop_optimization
     def get_ranks_by_symbols(self, symbols):
         dep_vars_queue = deque()
         pending_awaits = {*()}
@@ -97,17 +96,14 @@ class CompaniesRanks(RedisClient):
         if desc:
             future_0 = AppRequest('ZREVRANGE', **query_args)
             pending_awaits.add(future_0)
-            companies = AppResponse(future_0)
         else:
             future_1 = AppRequest('ZRANGE', **query_args)
             pending_awaits.add(future_1)
-            companies = AppResponse(future_1)
         for future in pending_awaits:
             AppResponse(future)
         return self.get_result(companies, start_index, desc)
 
     @top_level
-    @enable_loop_optimization
     def get_result(self, companies, start_index=0, desc=True):
         dep_vars_queue = deque()
         pending_awaits = {*()}

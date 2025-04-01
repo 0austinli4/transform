@@ -72,8 +72,8 @@ class CompaniesRanks(RedisClient):
             return self.get_zrange(0, 9)
         elif sort_key is RankSortKeys.BOTTOM10:
             return self.get_zrange(0, 9, False)
+    
     @top_level
-    @enable_loop_optimization
     def get_ranks_by_symbols(self, symbols):
         companies_capitalization = []
 
@@ -95,6 +95,7 @@ class CompaniesRanks(RedisClient):
             )
 
         return self.get_result(companies)
+    
     @top_level
     def get_zrange(self, start_index, stop_index, desc=True):
         query_args = {
@@ -111,8 +112,8 @@ class CompaniesRanks(RedisClient):
             companies = self.redis_client.zrange(**query_args)
 
         return self.get_result(companies, start_index, desc)
+    
     @top_level
-    @enable_loop_optimization
     def get_result(self, companies, start_index=0, desc=True):
         start_rank = int(start_index) + 1 if desc else (len(companies) - start_index)
         increase_factor = 1 if desc else -1
