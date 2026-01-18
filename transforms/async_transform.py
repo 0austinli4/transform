@@ -14,7 +14,7 @@ class FunctionCollector(ast.NodeVisitor):
             self.decorated_functions.add(node.name)
 
 class AsyncTransformer(ast.NodeTransformer):
-    def __init__(self, functions_calling_async,  async_calls):
+    def __init__(self, functions_calling_async, async_calls):
         self.async_calls = set(async_calls)
         self.transformed_functions = set()
         self.temp_var_counter = 0
@@ -33,15 +33,35 @@ class AsyncTransformer(ast.NodeTransformer):
                 else:
                     new_body.append(result)
 
+            # Add session_id as the first parameter
+            new_args = self.add_session_id_param(node.args)
+
             return ast.AsyncFunctionDef(
                 name=node.name,
-                args=node.args,
+                args=new_args,
                 body=new_body,
                 decorator_list=node.decorator_list,
                 returns=node.returns,
                 type_comment=node.type_comment
             )
         return self.generic_visit(node)
+
+    def add_session_id_param(self, args):
+        """Add session_id as the first parameter to function arguments"""
+        # Create a new session_id argument
+        session_id_arg = ast.arg(arg='session_id', annotation=None)
+
+        # Create a copy of the args with session_id prepended
+        new_args = ast.arguments(
+            posonlyargs=args.posonlyargs,
+            args=[session_id_arg] + args.args,
+            vararg=args.vararg,
+            kwonlyargs=args.kwonlyargs,
+            kw_defaults=args.kw_defaults,
+            kwarg=args.kwarg,
+            defaults=args.defaults
+        )
+        return new_args
 
     def visit_Call(self, node):
         func_name = self.get_func_name(node)
@@ -66,12 +86,15 @@ class AsyncTransformer(ast.NodeTransformer):
                 app_response_assign = self.copy_location(ast.Assign(
                     targets=node.targets,
                     value=ast.Call(
-                        func=ast.Name(id='AppResponse', ctx=ast.Load()),
-                        args=[ast.Name(id=future_var, ctx=ast.Load())],
+                        func=ast.Name(id='await_request', ctx=ast.Load()),
+                        args=[
+                            ast.Name(id='session_id', ctx=ast.Load()),
+                            ast.Name(id=future_var, ctx=ast.Load())
+                        ],
                         keywords=[]
                     )
                 ), node)
-                
+
                 return [future_assign, app_response_assign]
         return node
 
@@ -81,21 +104,24 @@ class AsyncTransformer(ast.NodeTransformer):
             if func_name in self.async_calls:
                 future_var = f"future_{self.future_counter}"
                 self.future_counter += 1
-                
+
                 ensure_future_call = self.transform_async_call(node.value)
                 future_assign = self.copy_location(ast.Assign(
                     targets=[ast.Name(id=future_var, ctx=ast.Store())],
                     value=ensure_future_call
                 ), node)
-                
+
                 app_response_expr = self.copy_location(ast.Expr(
                     value=ast.Call(
-                        func=ast.Name(id='AppResponse', ctx=ast.Load()),
-                        args=[ast.Name(id=future_var, ctx=ast.Load())],
+                        func=ast.Name(id='await_request', ctx=ast.Load()),
+                        args=[
+                            ast.Name(id='session_id', ctx=ast.Load()),
+                            ast.Name(id=future_var, ctx=ast.Load())
+                        ],
                         keywords=[]
                     )
                 ), node)
-                
+
                 return [future_assign, app_response_expr]
         return node
 
@@ -135,28 +161,31 @@ class AsyncTransformer(ast.NodeTransformer):
             iter_var = f"async_iter_{self.temp_var_counter}"
             self.future_counter += 1
             self.temp_var_counter += 1
-            
+
             future_assign = self.copy_location(ast.Assign(
                 targets=[ast.Name(id=future_var, ctx=ast.Store())],
                 value=self.transform_async_call(node.iter)
             ), node)
-            
+
             app_response_assign = self.copy_location(ast.Assign(
                 targets=[ast.Name(id=iter_var, ctx=ast.Store())],
                 value=ast.Call(
-                    func=ast.Name(id='AppResponse', ctx=ast.Load()),
-                    args=[ast.Name(id=future_var, ctx=ast.Load())],
+                    func=ast.Name(id='await_request', ctx=ast.Load()),
+                    args=[
+                        ast.Name(id='session_id', ctx=ast.Load()),
+                        ast.Name(id=future_var, ctx=ast.Load())
+                    ],
                     keywords=[]
                 )
             ), node)
-            
+
             new_for = self.copy_location(ast.For(
                 target=node.target,
                 iter=ast.Name(id=iter_var, ctx=ast.Load()),
                 body=[self.visit(stmt) for stmt in node.body],
                 orelse=[self.visit(stmt) for stmt in node.orelse]
             ), node)
-            
+
             return [future_assign, app_response_assign, new_for]
         else:
             node.iter = self.visit(node.iter)
@@ -168,20 +197,23 @@ class AsyncTransformer(ast.NodeTransformer):
         if isinstance(node, ast.Call) and self.is_async_call(node):
             iter_var = f"async_iter_{self.temp_var_counter}"
             self.temp_var_counter += 1
-            
+
             iter_assign = self.copy_location(ast.Assign(
                 targets=[ast.Name(id=iter_var, ctx=ast.Store())],
                 value=self.transform_async_call(node)
             ), node)
-            
+
             app_response_expr = self.copy_location(ast.Expr(
                 value=ast.Call(
-                    func=ast.Name(id='AppResponse', ctx=ast.Load()),
-                    args=[ast.Name(id=iter_var, ctx=ast.Load())],
+                    func=ast.Name(id='await_request', ctx=ast.Load()),
+                    args=[
+                        ast.Name(id='session_id', ctx=ast.Load()),
+                        ast.Name(id=iter_var, ctx=ast.Load())
+                    ],
                     keywords=[]
                 )
             ), node)
-            
+
             return ast.Name(id=iter_var, ctx=ast.Load()), [iter_assign, app_response_expr]
         return node, []
 
@@ -194,21 +226,24 @@ class AsyncTransformer(ast.NodeTransformer):
             cond_var = f"async_cond_{self.temp_var_counter}"
             self.future_counter += 1
             self.temp_var_counter += 1
-            
+
             future_assign = self.copy_location(ast.Assign(
                 targets=[ast.Name(id=future_var, ctx=ast.Store())],
                 value=self.transform_async_call(node)
             ), node)
-            
+
             app_response_assign = self.copy_location(ast.Assign(
                 targets=[ast.Name(id=cond_var, ctx=ast.Store())],
                 value=ast.Call(
-                    func=ast.Name(id='AppResponse', ctx=ast.Load()),
-                    args=[ast.Name(id=future_var, ctx=ast.Load())],
+                    func=ast.Name(id='await_request', ctx=ast.Load()),
+                    args=[
+                        ast.Name(id='session_id', ctx=ast.Load()),
+                        ast.Name(id=future_var, ctx=ast.Load())
+                    ],
                     keywords=[]
                 )
             ), node)
-            
+
             return ast.Name(id=cond_var, ctx=ast.Load()), [future_assign, app_response_assign]
         return node, []
 
@@ -232,24 +267,40 @@ class AsyncTransformer(ast.NodeTransformer):
     def transform_async_call(self, node):
         func_name = self.get_func_name(node)
 
-        ## this is modifiable - redis_client can be whatever the user has set redis to
-        if func_name and 'redis_client' in func_name:
+        ## this is modifiable - r can be whatever the user has set redis to
+        if func_name and func_name.startswith('r.'):
             # Extract the Redis operation (after 'r.')
             redis_op = func_name.split('.')[-1].upper()
-            
-            # Create AppRequest call with original arguments
+
+            # Build arguments for send_request(session_id, operation, key, new_val="", old_val="")
+            args = [
+                ast.Name(id='session_id', ctx=ast.Load()),
+                ast.Constant(value=redis_op),
+            ]
+
+            # Add key (first argument from original call)
+            if node.args:
+                args.append(node.args[0])
+            else:
+                args.append(ast.Constant(value=""))
+
+            # Add new_val (second argument from original call, if present)
+            if len(node.args) > 1:
+                args.append(node.args[1])
+
+            # Add old_val (third argument from original call, if present)
+            if len(node.args) > 2:
+                args.append(node.args[2])
+
+            # Create send_request call
             return ast.Call(
-                func=ast.Name(id='AppRequest', ctx=ast.Load()),
-                args=[
-                    ast.Constant(value=redis_op),
-                    *node.args,  # Pass through the original arguments
-                    *node.keywords  # Pass through the original keyword arguments
-                ],
+                func=ast.Name(id='send_request', ctx=ast.Load()),
+                args=args,
                 keywords=[]
             )
-        
+
         # Default to ensure_future for non-Redis calls
-        raise ValueError(f"Cannot use AppRequest with non-Redis call: {func_name}. "
+        raise ValueError(f"Cannot use send_request with non-Redis call: {func_name}. "
         "This method is not marked for async transformation.")
     
     def copy_location(self, new_node, old_node):

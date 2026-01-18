@@ -1,128 +1,288 @@
-import os
-import json
-import enum
-import logging
-from django.conf import settings
-from redis import Redis, RedisError, ConnectionError
-logger = logging.getLogger(__name__)
+import redis
+import re
+import settings
+r = settings.r
 
-class RankSortKeys(enum.Enum):
-    ALL = 'all'
-    TOP10 = 'top10'
-    BOTTOM10 = 'bottom10'
+class Timeline:
 
-class RedisClient:
-
-    def __init__(self):
-        return True
-
-    @top_level
-    def set_init_data(self):
+    def page(self, page):
         pending_awaits = {*()}
-        with open(os.path.join(settings.BASE_DIR, 'companies_data.json'), 'r') as init_data:
-            companies = json.load(init_data)
-            try:
-                for company in companies:
-                    symbol = self.add_prefix_to_symbol(settings.REDIS_PREFIX, company.get('symbol').lower())
-                    future_0 = AppRequest('ZADD', settings.REDIS_LEADERBOARD, {symbol: company.get('marketCap')})
-                    pending_awaits.add(future_0)
-                    future_1 = AppRequest('HSET', symbol, 'company', company.get('company'))
-                    pending_awaits.add(future_1)
-                    future_2 = AppRequest('HSET', symbol, 'country', company.get('country'))
-                    pending_awaits.add(future_2)
-            except ConnectionError:
-                if settings.REDIS_URL:
-                    error_message = f'Redis connection time out to {settings.REDIS_URL}.'
-                else:
-                    error_message = f'Redis connection time out to {settings.REDIS_HOST}:{settings.REDIS_PORT}.'
-                logger.error(error_message)
-                return
-        for future in pending_awaits:
-            AppResponse(future)
-        return None
+        _from = (page - 1) * 10
+        _to = page * 10
+        return (pending_awaits, [Post(post_id) for post_ids in send_request(session_id, 'LRANGE', 'timeline', _from, _to)])
 
-    @staticmethod
-    def add_prefix_to_symbol(prefix, symbol):
-        return f'{prefix}:{symbol}'
+class Model(object):
 
-    @staticmethod
-    def remove_prefix_to_symbol(prefix, symbol):
-        return symbol.replace(f'{prefix}:', '')
+    def __init__(self, id):
+        self.__dict__['id'] = id
 
-class CompaniesRanks(RedisClient):
+    def __eq__(self, other):
+        return self.id == other.id
 
-    @top_level
-    def update_company_market_capitalization(self, amount, symbol):
+    def __setattr__(self, name, value):
         pending_awaits = {*()}
-        future_0 = AppRequest('ZINCRBY', settings.REDIS_LEADERBOARD, amount, self.add_prefix_to_symbol(settings.REDIS_PREFIX, symbol))
-        pending_awaits.add(future_0)
-        for future in pending_awaits:
-            AppResponse(future)
-        return None
-
-    @top_level
-    def get_ranks_by_sort_key(self, key):
-        sort_key = RankSortKeys(key)
-        if sort_key is RankSortKeys.ALL:
-            return self.get_zrange(0, -1)
-        elif sort_key is RankSortKeys.TOP10:
-            return self.get_zrange(0, 9)
-        elif sort_key is RankSortKeys.BOTTOM10:
-            return self.get_zrange(0, 9, False)
-
-    @top_level
-    def get_ranks_by_symbols(self, symbols):
-        dep_vars_queue = deque()
-        pending_awaits = {*()}
-        companies_capitalization = []
-        pending_awaits.remove(future_0)
-        for symbol in symbols:
-            future_0 = AppRequest('ZSCORE', settings.REDIS_LEADERBOARD, self.add_prefix_to_symbol(settings.REDIS_PREFIX, symbol))
-            dep_vars_queue.append(future_0)
-        for symbol in symbols:
-            zscore = AppResponse(dep_vars_queue.popleft())
-            companies_capitalization.append(zscore)
-        companies = []
-        for index, market_capitalization in enumerate(companies_capitalization):
-            companies.append([self.add_prefix_to_symbol(settings.REDIS_PREFIX, symbols[index]), market_capitalization])
-        for future in pending_awaits:
-            AppResponse(future)
-        return self.get_result(companies)
-
-    @top_level
-    def get_zrange(self, start_index, stop_index, desc=True):
-        pending_awaits = {*()}
-        query_args = {'name': settings.REDIS_LEADERBOARD, 'start': start_index, 'end': stop_index, 'withscores': True, 'score_cast_func': str}
-        if desc:
-            future_0 = AppRequest('ZREVRANGE', **query_args)
+        if name not in self.__dict__:
+            klass = self.__class__.__name__.lower()
+            key = '%s:id:%s:%s' % (klass, self.id, name.lower())
+            future_0 = send_request(session_id, 'SET', key, value)
             pending_awaits.add(future_0)
         else:
-            future_1 = AppRequest('ZRANGE', **query_args)
-            pending_awaits.add(future_1)
-        for future in pending_awaits:
-            AppResponse(future)
-        return self.get_result(companies, start_index, desc)
+            self.__dict__[name] = value
+        return (pending_awaits, None)
 
-    @top_level
-    def get_result(self, companies, start_index=0, desc=True):
-        dep_vars_queue = deque()
+    def __getattr__(self, name):
         pending_awaits = {*()}
-        start_rank = int(start_index) + 1 if desc else len(companies) - start_index
-        increase_factor = 1 if desc else -1
-        results = []
-        pending_awaits.remove(future_0)
-        for company in companies:
-            symbol = company[0]
-            market_cap = company[1]
-            future_0 = AppRequest('HGETALL', symbol)
-            dep_vars_queue.append(future_0)
-            dep_vars_queue.append(market_cap)
-            dep_vars_queue.append(start_rank)
-            dep_vars_queue.append(symbol)
-            start_rank += increase_factor
-        for company in companies:
-            company_info = AppResponse(dep_vars_queue.popleft())
-            results.append({'company': company_info['company'], 'country': company_info['country'], 'marketCap': dep_vars_queue.popleft(), 'rank': dep_vars_queue.popleft(), 'symbol': self.remove_prefix_to_symbol(settings.REDIS_PREFIX, dep_vars_queue.popleft())})
+        if name not in self.__dict__:
+            klass = self.__class__.__name__.lower()
+            future_0 = send_request(session_id, 'GET', '%s:id:%s:%s' % (klass, self.id, name.lower()))
+            pending_awaits.add(future_0)
+            if v:
+                pending_awaits.remove(session_id)
+                return (pending_awaits, v)
+            raise AttributeError("%s doesn't exist" % name)
+        else:
+            self.__dict__[name] = value
+        return (pending_awaits, None)
+
+class User(Model):
+
+    @staticmethod
+    def find_by_username(username):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'GET', 'user:username:%s' % username)
+        pending_awaits.add(future_0)
+        if _id is not None:
+            pending_awaits.remove(session_id)
+            return User(int(_id))
+        else:
+            return None
         for future in pending_awaits:
-            AppResponse(future)
-        return json.dumps(results)
+            await_request(session_id, future)
+        return None
+
+    @staticmethod
+    def find_by_id(_id):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'EXISTS', 'user:id:%s:username' % _id)
+        pending_awaits.add(future_0)
+        if async_cond_0:
+            return User(int(_id))
+        else:
+            return None
+        for future in pending_awaits:
+            await_request(session_id, future)
+        return None
+
+    @staticmethod
+    def create(username, password):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'INCR', 'user:uid')
+        pending_awaits.add(future_0)
+        future_1 = send_request(session_id, 'GET', 'user:username:%s' % username)
+        pending_awaits.add(future_1)
+        if not async_cond_0:
+            future_2 = send_request(session_id, 'SET', 'user:id:%s:username' % user_id, username)
+            pending_awaits.add(future_2)
+            future_3 = send_request(session_id, 'SET', 'user:username:%s' % username, user_id)
+            pending_awaits.add(future_3)
+            salt = settings.SALT
+            future_4 = send_request(session_id, 'SET', 'user:id:%s:password' % user_id, salt + password)
+            pending_awaits.add(future_4)
+            future_5 = send_request(session_id, 'LPUSH', 'users', user_id)
+            pending_awaits.add(future_5)
+            pending_awaits.remove(session_id)
+            return User(user_id)
+        for future in pending_awaits:
+            await_request(session_id, future)
+        return None
+
+    def posts(self, page=1):
+        pending_awaits = {*()}
+        _from, _to = ((page - 1) * 10, page * 10)
+        future_0 = send_request(session_id, 'LRANGE', 'user:id:%s:posts' % self.id, _from, _to)
+        pending_awaits.add(future_0)
+        if posts:
+            pending_awaits.remove(session_id)
+            return (pending_awaits, [Post(int(post_id)) for post_id in posts])
+        return (pending_awaits, [])
+
+    def timeline(self, page=1):
+        pending_awaits = {*()}
+        _from, _to = ((page - 1) * 10, page * 10)
+        future_0 = send_request(session_id, 'LRANGE', 'user:id:%s:timeline' % self.id, _from, _to)
+        pending_awaits.add(future_0)
+        if timeline:
+            pending_awaits.remove(session_id)
+            return (pending_awaits, [Post(int(post_id)) for post_id in timeline])
+        return (pending_awaits, [])
+
+    def mentions(self, page=1):
+        pending_awaits = {*()}
+        _from, _to = ((page - 1) * 10, page * 10)
+        future_0 = send_request(session_id, 'LRANGE', 'user:id:%s:mentions' % self.id, _from, _to)
+        pending_awaits.add(future_0)
+        if mentions:
+            pending_awaits.remove(session_id)
+            return (pending_awaits, [Post(int(post_id)) for post_id in mentions])
+        return (pending_awaits, [])
+
+    def add_post(self, post):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'LPUSH', 'user:id:%s:posts' % self.id, post.id)
+        pending_awaits.add(future_0)
+        future_1 = send_request(session_id, 'LPUSH', 'user:id:%s:timeline' % self.id, post.id)
+        pending_awaits.add(future_1)
+        future_2 = send_request(session_id, 'SADD', 'posts:id', post.id)
+        pending_awaits.add(future_2)
+        return (pending_awaits, None)
+
+    def add_timeline_post(self, post):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'LPUSH', 'user:id:%s:timeline' % self.id, post.id)
+        pending_awaits.add(future_0)
+        return (pending_awaits, None)
+
+    def add_mention(self, post):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'LPUSH', 'user:id:%s:mentions' % self.id, post.id)
+        pending_awaits.add(future_0)
+        return (pending_awaits, None)
+
+    def follow(self, user):
+        pending_awaits = {*()}
+        if user == self:
+            return (pending_awaits, None)
+        else:
+            future_0 = send_request(session_id, 'SADD', 'user:id:%s:followees' % self.id, user.id)
+            pending_awaits.add(future_0)
+            pending_awaits_add_follower, _ = user.add_follower(self)
+            pending_awaits.update(pending_awaits_add_follower)
+        return (pending_awaits, None)
+
+    def stop_following(self, user):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'SREM', 'user:id:%s:followees' % self.id, user.id)
+        pending_awaits.add(future_0)
+        pending_awaits_remove_follower, _ = user.remove_follower(self)
+        pending_awaits.update(pending_awaits_remove_follower)
+        return (pending_awaits, None)
+
+    def following(self, user):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'SISMEMBER', 'user:id:%s:followees' % self.id, user.id)
+        pending_awaits.add(future_0)
+        if async_cond_0:
+            return (pending_awaits, True)
+        return (pending_awaits, False)
+
+    @property
+    def followers(self):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'SMEMBERS', 'user:id:%s:followers' % self.id)
+        pending_awaits.add(future_0)
+        if followers:
+            pending_awaits.remove(session_id)
+            return [User(int(user_id)) for user_id in followers]
+        for future in pending_awaits:
+            await_request(session_id, future)
+        return []
+
+    @property
+    def followees(self):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'SMEMBERS', 'user:id:%s:followees' % self.id)
+        pending_awaits.add(future_0)
+        if followees:
+            pending_awaits.remove(session_id)
+            return [User(int(user_id)) for user_id in followees]
+        for future in pending_awaits:
+            await_request(session_id, future)
+        return []
+
+    @property
+    def tweet_count(self):
+        pending_awaits = {*()}
+        for future in pending_awaits:
+            await_request(session_id, future)
+        return send_request(session_id, 'LLEN', 'user:id:%s:posts' % self.id) or 0
+
+    @property
+    def followees_count(self):
+        pending_awaits = {*()}
+        for future in pending_awaits:
+            await_request(session_id, future)
+        return send_request(session_id, 'SCARD', 'user:id:%s:followees' % self.id) or 0
+
+    @property
+    def followers_count(self):
+        pending_awaits = {*()}
+        for future in pending_awaits:
+            await_request(session_id, future)
+        return send_request(session_id, 'SCARD', 'user:id:%s:followers' % self.id) or 0
+
+    def add_follower(self, user):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'SADD', 'user:id:%s:followers' % self.id, user.id)
+        pending_awaits.add(future_0)
+        return (pending_awaits, None)
+
+    def remove_follower(self, user):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'SREM', 'user:id:%s:followers' % self.id, user.id)
+        pending_awaits.add(future_0)
+        return (pending_awaits, None)
+
+class Post(Model):
+
+    @staticmethod
+    def create(user, content):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'INCR', 'post:uid')
+        pending_awaits.add(future_0)
+        future_1 = send_request(session_id, 'LPUSH', 'timeline', post_id)
+        pending_awaits.add(future_1)
+        pending_awaits.remove(session_id)
+        post = Post(post_id)
+        post.content = content
+        post.user_id = user.id
+        pending_awaits_add_post, _ = user.add_post(post)
+        pending_awaits.update(pending_awaits_add_post)
+        for follower in user.followers:
+            pending_awaits_add_timeline_post, _ = follower.add_timeline_post(post)
+            pending_awaits.update(pending_awaits_add_timeline_post)
+        mentions = re.findall('@\\w+', content)
+        for mention in mentions:
+            pending_awaits_find_by_username, u = User.find_by_username(mention[1:])
+            pending_awaits.update(pending_awaits_find_by_username)
+            if u:
+                pending_awaits_add_mention, pending_awaits_add_mention, _ = u.add_mention(post)
+                pending_awaits.update(pending_awaits_add_mention)
+                pending_awaits.update(pending_awaits_add_mention)
+                post_id = await_request(session_id, future_0)
+        for future in pending_awaits:
+            await_request(session_id, future)
+        return None
+
+    @staticmethod
+    def find_by_id(id):
+        pending_awaits = {*()}
+        future_0 = send_request(session_id, 'SISMEMBER', 'posts:id', int(id))
+        pending_awaits.add(future_0)
+        if async_cond_0:
+            return Post(id)
+        for future in pending_awaits:
+            await_request(session_id, future)
+        return None
+
+    @property
+    def user(self):
+        pending_awaits = {*()}
+        for future in pending_awaits:
+            await_request(session_id, future)
+        return User.find_by_id(r.get('post:id:%s:user_id' % self.id))
+
+def main():
+    pass
+if __name__ == '__main__':
+    main()
+    return None

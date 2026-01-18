@@ -128,11 +128,11 @@ class AsyncFuturePushUp(ast.NodeTransformer):
         # Check for expression statements
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
             if isinstance(node.value.func, ast.Name):
-                return node.value.func.id == 'AppRequest'
-        # Check for assignments where the value is an AppRequest call
+                return node.value.func.id == 'send_request'
+        # Check for assignments where the value is an send_request call
         elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
             if isinstance(node.value.func, ast.Name):
-                return node.value.func.id == 'AppRequest'
+                return node.value.func.id == 'send_request'
         return False
 
     def is_external_function_call(self, node):

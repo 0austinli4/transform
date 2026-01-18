@@ -54,27 +54,27 @@ class AwaitMover(ast.NodeTransformer):
         """
         Track dependencies between variables
         Specifically look for:
-        1. AppResponse variable assignments
-        2. Variables that use AppResponse results
+        1. await_request variable assignments
+        2. Variables that use await_request results
         """
         print(f"\n--- Tracking Dependencies for Node: {type(node)} ---")
 
-        # Track AppResponse variable assignments
+        # Track await_request variable assignments
         if (
             isinstance(node, ast.Assign)
             and isinstance(node.value, ast.Call)
             and isinstance(node.value.func, ast.Name)
-            and node.value.func.id == "AppResponse"
+            and node.value.func.id == "await_request"
         ):
             # Get the target variable name
             if node.targets and isinstance(node.targets[0], ast.Name):
                 var_name = node.targets[0].id
                 self.app_response_vars.add(var_name)
-                print(f"[DEBUG] Tracked AppResponse variable: {var_name}")
+                print(f"[DEBUG] Tracked await_request variable: {var_name}")
 
-        # Track variable usages, especially of AppResponse variables
+        # Track variable usages, especially of await_request variables
         if isinstance(node, ast.Assign):
-            # Check if the right side uses any AppResponse variables
+            # Check if the right side uses any await_request variables
             # used_vars = self.extract_used_vars(node.value)
             used_vars = []
             print(f"[DEBUG] Used variables in assignment: {used_vars}")
@@ -97,7 +97,7 @@ class AwaitMover(ast.NodeTransformer):
             for used_var in used_vars:
                 if used_var in self.app_response_vars:
                     print(
-                        f"[DEBUG] AppResponse variable used in method/subscript: {used_var}"
+                        f"[DEBUG] await_request variable used in method/subscript: {used_var}"
                     )
 
     def visit_FunctionDef(self, node):
@@ -127,7 +127,7 @@ class AwaitMover(ast.NodeTransformer):
         final_body = []
 
         for stmt in body:
-            # Check if the statement is an AppResponse call
+            # Check if the statement is an await_request call
             if self.is_app_response_call(stmt):
                 continue
 
@@ -145,8 +145,8 @@ class AwaitMover(ast.NodeTransformer):
         if self.check_exact_await_loop(node):
             return node
 
-        app_response_produced = set()  # Variables related to AppResponse
-        dependent_vars = set()  # Variables dependent on AppResponse
+        app_response_produced = set()  # Variables related to await_request
+        dependent_vars = set()  # Variables dependent on await_request
         variable_queue = deque()
 
         # First pass: identify variables and dependencies
@@ -160,21 +160,22 @@ class AwaitMover(ast.NodeTransformer):
         # do this by finding app response and get_vars_produced
         # Pass 2: find all dependent variables to vars_produced_app_response
         # move them to the second loop
-        # Pass 3: find if the dependent vars depend on anything above first AppResponse
+        # Pass 3: find if the dependent vars depend on anything above first await_request
         # duplicate these
         # queue object
         # depdenedices by variables used vs. produed originally
 
         # PASS 1 - FIND APPRESPONSE CALLS
         for stmt in node.body:
-            # Identify AppResponse calls
+            # Identify await_request calls
             if self.is_pending_await_remove(stmt):
                 continue
             if self.is_app_response_call(stmt):
                 # first_for_loop.pop()
-                # Modify the AppResponse call to use dep_var_queue.pop()
+                # Modify the await_request call to use dep_var_queue.pop()
                 app_response_produced.update([target.id for target in stmt.targets])
                 stmt.value.args = [
+                    ast.Name(id="session_id", ctx=ast.Load()),
                     ast.Call(
                         func=ast.Attribute(
                             value=ast.Name(id="dep_vars_queue", ctx=ast.Load()),
@@ -268,7 +269,7 @@ class AwaitMover(ast.NodeTransformer):
         # Update the for loop bodies
         node.body = first_for_loop
 
-        # If we found AppResponse calls or dependent lines, create a new for loop
+        # If we found await_request calls or dependent lines, create a new for loop
         if second_for_loop:
             app_response_loop = ast.For(
                 target=node.target,
@@ -300,22 +301,22 @@ class AwaitMover(ast.NodeTransformer):
         )
 
     def visit_Assign(self, node):
-        # Check for AppResponse calls in assignments
+        # Check for await_request calls in assignments
         if (
             isinstance(node.value, ast.Call)
             and isinstance(node.value.func, ast.Name)
-            and node.value.func.id == "AppResponse"
+            and node.value.func.id == "await_request"
         ):
             # skip assignment
             return None
         return node
 
     def visit_Expr(self, node):
-        # Check for direct AppResponse calls
+        # Check for direct await_request calls
         if (
             isinstance(node.value, ast.Call)
             and isinstance(node.value.func, ast.Name)
-            and node.value.func.id == "AppResponse"
+            and node.value.func.id == "await_request"
         ):
             # Skip this expression in the first pass
             return None
@@ -406,16 +407,16 @@ class AwaitMover(ast.NodeTransformer):
             isinstance(stmt, ast.Assign)
             and isinstance(stmt.value, ast.Call)
             and isinstance(stmt.value.func, ast.Name)
-            and stmt.value.func.id == "AppResponse"
+            and stmt.value.func.id == "await_request"
         ):
             return True
 
-        # Check for direct call pattern: AppResponse(x)
+        # Check for direct call pattern: await_request(x)
         if (
             isinstance(stmt, ast.Expr)
             and isinstance(stmt.value, ast.Call)
             and isinstance(stmt.value.func, ast.Name)
-            and stmt.value.func.id == "AppResponse"
+            and stmt.value.func.id == "await_request"
         ):
             return True
 
@@ -425,11 +426,11 @@ class AwaitMover(ast.NodeTransformer):
         # Check for expression statements
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
             if isinstance(node.value.func, ast.Name):
-                return node.value.func.id == "AppRequest"
-        # Check for assignments where the value is an AppRequest call
+                return node.value.func.id == "send_request"
+        # Check for assignments where the value is an send_request call
         elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
             if isinstance(node.value.func, ast.Name):
-                return node.value.func.id == "AppRequest"
+                return node.value.func.id == "send_request"
         return False
 
     def is_external_function_call(self, node):
@@ -541,10 +542,12 @@ class AwaitMover(ast.NodeTransformer):
             and isinstance(node.body[0], ast.Expr)
             and isinstance(node.body[0].value, ast.Call)
             and isinstance(node.body[0].value.func, ast.Name)
-            and node.body[0].value.func.id == "AppResponse"
-            and len(node.body[0].value.args) == 1
+            and node.body[0].value.func.id == "await_request"
+            and len(node.body[0].value.args) == 2
             and isinstance(node.body[0].value.args[0], ast.Name)
-            and node.body[0].value.args[0].id == "future"
+            and node.body[0].value.args[0].id == "session_id"
+            and isinstance(node.body[0].value.args[1], ast.Name)
+            and node.body[0].value.args[1].id == "future"
             and not node.orelse
         ):
             return True  # Do nothing and return the original node

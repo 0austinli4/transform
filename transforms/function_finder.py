@@ -23,16 +23,19 @@ class CallFinder(ast.NodeVisitor):
                 # Add to call graph
                 call_signature = f"{obj_name}.{func_name}" if obj_name else func_name
                 self.call_graph[self.current_function].add(call_signature)
-                
-                # Check both the object name and function name against target functions
-                if (func_name in self.target_functions or 
+
+                # Check the full call signature, object name, and function name against target functions
+                if (func_name in self.target_functions or
+                    call_signature in self.target_functions or
                     (obj_name and obj_name in self.target_functions)):
                     self.functions_with_calls.add(self.current_function)
-                    
-                    # If this is a method call on a target object, add the full qualified name
-                    if obj_name and obj_name in self.target_functions:
+
+                    # If this is a method call matching a target, add the full qualified name
+                    if call_signature in self.target_functions:
+                        self.object_calls.add(call_signature)
+                    elif obj_name and obj_name in self.target_functions:
                         self.object_calls.add(f"{obj_name}.{func_name}")
-        
+
         self.generic_visit(node)
 
     def get_func_name(self, node):

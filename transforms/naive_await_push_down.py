@@ -309,22 +309,22 @@ class AwaitMover(ast.NodeTransformer):
         # Check for expression statements
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
             if isinstance(node.value.func, ast.Name):
-                return node.value.func.id == "AppResponse"
-        # Check for assignments where the value is an AppResponse call
+                return node.value.func.id == "await_request"
+        # Check for assignments where the value is an await_request call
         elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
             if isinstance(node.value.func, ast.Name):
-                return node.value.func.id == "AppResponse"
+                return node.value.func.id == "await_request"
         return False
 
     def is_app_request_call(self, node):
         # Check for expression statements
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
             if isinstance(node.value.func, ast.Name):
-                return node.value.func.id == "AppRequest"
-        # Check for assignments where the value is an AppRequest call
+                return node.value.func.id == "send_request"
+        # Check for assignments where the value is an send_request call
         elif isinstance(node, ast.Assign) and isinstance(node.value, ast.Call):
             if isinstance(node.value.func, ast.Name):
-                return node.value.func.id == "AppRequest"
+                return node.value.func.id == "send_request"
 
         return False
 
@@ -367,8 +367,11 @@ class AwaitMover(ast.NodeTransformer):
             body=[
                 ast.Expr(
                     value=ast.Call(
-                        func=ast.Name(id="AppResponse", ctx=ast.Load()),
-                        args=[ast.Name(id="future", ctx=ast.Load())],
+                        func=ast.Name(id="await_request", ctx=ast.Load()),
+                        args=[
+                            ast.Name(id="session_id", ctx=ast.Load()),
+                            ast.Name(id="future", ctx=ast.Load())
+                        ],
                         keywords=[],
                     )
                 )
