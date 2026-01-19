@@ -85,7 +85,15 @@ class AwaitMover(ast.NodeTransformer):
 
         for stmt in body:
             self.counter += 1
-            stmt = self.visit(stmt)
+            result = self.visit(stmt)
+
+            # Handle case where visit returns a list (e.g., from visit_If with pre-if awaits)
+            if isinstance(result, list):
+                for r in result:
+                    final_body.append(r)
+                continue
+
+            stmt = result
             variables_used = get_variables_used(stmt)
             print("\nVariables used in this line", variables_used)
             print("Current variable dependencies", self.var_dependencies)
@@ -341,6 +349,35 @@ class AwaitMover(ast.NodeTransformer):
 
     def visit_If(self, node):
         self.inside_if = True
+
+        # Check if the condition uses any variables that need to be awaited first
+        condition_vars = get_variables_used(node.test)
+        pre_if_stmts = []
+
+        variables_to_await = condition_vars.intersection(self.var_dependencies.keys())
+        for variable_name in variables_to_await:
+            stmt_append = self.var_dependencies[variable_name]
+            pre_if_stmts.append(stmt_append)
+            # Create AST node for `pending_awaits.remove(future_0)`
+            # Get the future variable name from the await_request call
+            if hasattr(stmt_append, 'value') and hasattr(stmt_append.value, 'args') and len(stmt_append.value.args) > 1:
+                future_var_name = stmt_append.value.args[1].id if isinstance(stmt_append.value.args[1], ast.Name) else None
+                if future_var_name:
+                    remove_stmt = ast.Expr(
+                        value=ast.Call(
+                            func=ast.Attribute(
+                                value=ast.Name(id="pending_awaits", ctx=ast.Load()),
+                                attr="remove",
+                                ctx=ast.Load(),
+                            ),
+                            args=[ast.Name(id=future_var_name, ctx=ast.Load())],
+                            keywords=[],
+                        )
+                    )
+                    pre_if_stmts.append(remove_stmt)
+            # Remove from dependencies since we've emitted the await
+            del self.var_dependencies[variable_name]
+
         node.body = self.process_body(node.body)
         if node.orelse:
             if isinstance(node.orelse[0], ast.If):
@@ -348,6 +385,10 @@ class AwaitMover(ast.NodeTransformer):
             else:
                 node.orelse = self.process_body(node.orelse)
         self.inside_if = False
+
+        # If we have pre-if statements, return them along with the if node
+        if pre_if_stmts:
+            return pre_if_stmts + [node]
         return node
 
     def visit_For(self, node):
